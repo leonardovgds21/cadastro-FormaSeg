@@ -1,0 +1,4 @@
+* text=auto
+*.bat text eol=crlf
+LEIA-ME.txt text eol=crlf
+executavel/** -text
