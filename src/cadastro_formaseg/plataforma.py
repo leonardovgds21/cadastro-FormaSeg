@@ -22,6 +22,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from .config import URL_PAINEL
+from .gerador import sem_acento
 
 URL_BASE = URL_PAINEL.split("/painel")[0]
 URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
@@ -108,22 +109,33 @@ class Plataforma:
         d.get(self.url_usuarios)
 
     # ---------- consulta ----------
-    def emails_existentes(self, emails: list[str]) -> set[str]:
-        """Procura cada e-mail na listagem de usuários e devolve os que já existem."""
+    def emails_existentes(self, alunos: list[tuple[str, str]]) -> set[str]:
+        """Recebe (e-mail, nome completo) e devolve os e-mails que já existem.
+
+        A listagem mostra só nomes, então a busca é pelo e-mail e o resultado
+        só conta se a linha tiver o primeiro e o último nome da pessoa. Assim,
+        se a busca não filtrar, a lista inteira não vira "já existe".
+        """
         d = self.driver
         existentes = set()
-        for email in emails:
+        for email, nome in alunos:
             self._ir_para_usuarios()
             busca = self._esperar(EC.presence_of_element_located(
                 (By.CSS_SELECTOR, "input[placeholder*='Pesquisar por usu']")))
             busca.clear()
-            busca.send_keys(email + Keys.ENTER)
-            time.sleep(2)
-            corpo = d.find_element(By.TAG_NAME, "body").text.lower()
-            linhas = d.find_elements(By.CSS_SELECTOR, "table tbody tr")
-            sem_resultado = "nenhum" in corpo and "encontrado" in corpo
-            if linhas and not sem_resultado and len(linhas) < 50:
-                existentes.add(email)
+            busca.send_keys(email)
+            botoes = d.find_elements(By.XPATH, "//button[normalize-space()='Selecionar']")
+            if botoes:
+                botoes[0].click()
+            else:
+                busca.send_keys(Keys.ENTER)
+            time.sleep(3)
+            partes = sem_acento(nome).lower().split()
+            for linha in d.find_elements(By.CSS_SELECTOR, "table tbody tr"):
+                texto = sem_acento(linha.text).lower()
+                if partes and partes[0] in texto and partes[-1] in texto:
+                    existentes.add(email)
+                    break
         return existentes
 
     # ---------- importação ----------

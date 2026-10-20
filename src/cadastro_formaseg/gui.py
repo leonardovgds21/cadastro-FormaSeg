@@ -250,7 +250,7 @@ class App(tk.Tk):
             with Plataforma(log=log, visivel=visivel) as p:
                 p.login(usuario, senha)
                 log("Conferindo se os e-mails já existem na plataforma...")
-                existentes = p.emails_existentes([a.email for a in self.alunos])
+                existentes = p.emails_existentes([(a.email, f"{a.nome} {a.sobrenome}") for a in self.alunos])
                 if existentes:
                     self.fila.put(("conflito", existentes))
                     return
