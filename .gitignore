@@ -1,0 +1,16 @@
+# Dados pessoais: fichas e planilhas reais NUNCA vão para o GitHub
+assets/
+saida/
+dados/
+*.pdf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# PyInstaller (a pasta final fica em executavel/)
+build/
+dist/
