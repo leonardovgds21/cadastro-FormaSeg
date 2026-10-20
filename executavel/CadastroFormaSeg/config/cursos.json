@@ -1,0 +1,17 @@
+{
+  "_comentario": "Treinamentos da lista suspensa. 'id' é o valor da coluna Curso/Combo do import-curso.csv. Para incluir um curso, copie uma linha e troque nome e id.",
+  "cursos": [
+    {"nome": "NR 33 – Trabalhador Autorizado e Vigia – Teórico", "id": "82557"},
+    {"nome": "NR 33 – Supervisor de Entrada – Teórico", "id": "82853"},
+    {"nome": "NR 33 – Trabalhador Autorizado e Vigia – Reciclagem – Teórico", "id": "82451"},
+    {"nome": "NR 33 – Supervisor de Entrada – Reciclagem – Teórico", "id": "82747"},
+    {"nome": "NR 18 – Plataforma Elevatória Móvel de Trabalho (PEMT) – Teórico", "id": "87126"},
+    {"nome": "NR 18 – PEMT – Teórico – Reciclagem", "id": "87162"},
+    {"nome": "NR 18 – Integração de Segurança na Construção Civil (4 horas)", "id": "73510"},
+    {"nome": "NR 18 – Integração de Segurança na Construção Civil (16 horas)", "id": "74122"},
+    {"nome": "NR 18 – Integração de Segurança na Construção Civil – Reciclagem (4 horas)", "id": "73632"},
+    {"nome": "NR 18 – Integração de Segurança na Construção Civil – Reciclagem (16 horas)", "id": "74812"},
+    {"nome": "NR 1 – Treinamento de Integração de Segurança – 6 horas", "id": "86950"},
+    {"nome": "NR 06 – EPI – Equipamento de Proteção Individual – 4 horas", "id": "84075"}
+  ]
+}

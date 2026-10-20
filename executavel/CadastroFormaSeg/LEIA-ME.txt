@@ -1,0 +1,33 @@
+CADASTRO FORMASEG
+=================
+
+Como usar
+1. Abra CadastroFormaSeg.exe.
+2. Clique em "Abrir ficha (PDF)" e escolha a ficha de empregado do Domínio.
+   Um PDF pode ter vários colaboradores (um por página).
+3. Confira os dados de cada colaborador e corrija se precisar.
+4. Escolha os treinamentos na lista suspensa e clique em "Adicionar"
+   (ou deixe "Somente cadastro"). "Aplicar a todos" copia os treinamentos
+   do colaborador selecionado para todos.
+5. Clique em "Enviar para a plataforma" e informe o login de administrador.
+   O navegador trabalha escondido; acompanhe pelo registro na parte de baixo.
+   - "Modo teste" faz tudo, mas cancela na confirmação (não importa nada).
+   - "Mostrar navegador" deixa ver o que está acontecendo.
+   - "Gerar CSVs" só cria os arquivos, para importar à mão.
+
+Regras
+- E-mail e usuário: primeironome.ultimonome@gapgestao.com.br (sem acento;
+  ignora Filho, Júnior, Neto...). Se já existir, vira nome.sobrenome2, 3...
+- Senha: CPF só com números.
+
+Arquivos desta pasta
+- config\cursos.json  Lista de treinamentos (nome e ID do Curso/Combo).
+                      Pode ser editada no Bloco de Notas.
+- saida\              CSVs gerados (um subpasta por envio). Contém CPF:
+                      não compartilhe.
+- dados\historico.csv E-mails já gerados neste computador (sem CPF).
+
+Para usar em outro computador, copie a pasta CadastroFormaSeg inteira.
+Precisa do Microsoft Edge (já vem no Windows) e de internet.
+O login só é salvo se você marcar "Lembrar", e fica no Cofre de
+Credenciais do Windows daquele computador.
