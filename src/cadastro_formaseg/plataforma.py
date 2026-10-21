@@ -17,7 +17,12 @@ from pathlib import Path
 from typing import Callable
 
 from selenium import webdriver
-from selenium.common.exceptions import NoAlertPresentException, TimeoutException, WebDriverException
+from selenium.common.exceptions import (
+    NoAlertPresentException,
+    StaleElementReferenceException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
@@ -93,7 +98,9 @@ class Plataforma:
         """Espera a condição. Com `o_que`, um tempo esgotado vira um erro claro
         dizendo o que faltou, com print e resumo da página salvos em dados/erros."""
         try:
-            return WebDriverWait(self.driver, tempo or self.espera).until(condicao)
+            return WebDriverWait(
+                self.driver, tempo or self.espera, ignored_exceptions=[StaleElementReferenceException]
+            ).until(condicao)
         except TimeoutException:
             if not o_que:
                 raise
@@ -143,7 +150,7 @@ class Plataforma:
         campo_senha.send_keys(senha + Keys.ENTER)
         try:
             self._esperar(EC.staleness_of(campo_senha), 30)
-        except TimeoutException:
+        except WebDriverException:  # inclui tempo esgotado e "node does not belong to the document" na troca de página
             pass
         if d.find_elements(By.CSS_SELECTOR, "input[type='password']") and "/painel" in d.current_url:
             erro = d.find_elements(By.CSS_SELECTOR, ".woocommerce-error, .login_error, .alert-danger")
@@ -190,9 +197,23 @@ class Plataforma:
         for email in emails:
             self._ir_para_usuarios()
             exato = re.compile(r"(?<![\w.@+-])" + re.escape(email.lower()) + r"(?![\w.@+-])")
-            if exato.search(self._opcoes_da_busca(email)):
+            if exato.search(self._buscar_com_repeticao(email)):
                 existentes.add(email)
         return existentes
+
+    def _buscar_com_repeticao(self, termo: str, tentativas: int = 3) -> str:
+        """A página redesenha a busca enquanto carrega; se um elemento ficar
+        obsoleto no meio, recarrega a tela e tenta de novo."""
+        for tentativa in range(tentativas):
+            try:
+                return self._opcoes_da_busca(termo)
+            except StaleElementReferenceException:
+                if tentativa == tentativas - 1:
+                    raise ErroPlataforma(
+                        f"A busca \"Pesquisar por usuário\" mudou enquanto era lida ({tentativas} tentativas).")
+                time.sleep(2)
+                self._ir_para_usuarios()
+        return ""
 
     def _opcoes_da_busca(self, termo: str) -> str:
         """Digita o termo na busca de usuários e devolve o texto das opções (minúsculo)."""
@@ -211,19 +232,27 @@ class Plataforma:
         campo.send_keys(termo)
 
         def carregou(drv):
-            opcoes = drv.find_elements(By.CSS_SELECTOR, ".select2-container--open .select2-results__option")
-            textos = []
-            for o in opcoes:
-                classes = o.get_attribute("class") or ""
-                texto = (o.text or "").strip().lower()
+            # Lê todas as opções numa única chamada: a lista é redesenhada a cada
+            # resposta da pesquisa, e elementos guardados ficariam obsoletos.
+            try:
+                opcoes = drv.execute_script(
+                    "return [...document.querySelectorAll('.select2-container--open .select2-results__option')]"
+                    ".map(o => [o.className || '', (o.innerText || o.textContent || '').trim().toLowerCase()]);")
+            except WebDriverException:
+                return False
+            if not opcoes:
+                return False
+            for classes, texto in opcoes:
                 if "loading-results" in classes or not texto or any(
                         p in texto for p in ("pesquisando", "searching", "carregando", "loading", "digite", "please enter")):
                     return False
-                textos.append(texto)
-            return "\n".join(textos) if textos else False
+            return "\n".join(texto for _, texto in opcoes)
 
         texto = self._esperar(carregou, 20, o_que=f"o resultado da busca por {termo}")
-        campo.send_keys(Keys.ESCAPE)
+        try:
+            campo.send_keys(Keys.ESCAPE)
+        except WebDriverException:  # o campo foi redesenhado; a próxima busca recarrega a página
+            pass
         return texto
 
     # ---------- importação ----------
