@@ -30,17 +30,19 @@ URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
 
 Log = Callable[[str], None]
 
-# Acha o elemento visível cujo texto (ou value) é o procurado, ignorando
-# maiúsculas, espaços e ícones; serve para <a>, <button>, <input>, <label>,
-# <span> etc. Entre vários, fica o mais interno (o próprio botão).
+# Acha o elemento cujo texto (ou value) contém o procurado, ignorando
+# maiúsculas, espaços e ícones. "Contém" porque o botão pode trazer dentro
+# dele o balão de ajuda ("Você pode querer ver o exemplo do arquivo CSV").
+# Serve para <a>, <button>, <input>, <label>, <span> etc.; fica o elemento mais
+# interno com o texto e sobe até o que é clicável. Prefere os visíveis.
 _JS_ACHAR_BOTAO = """
 const alvo = arguments[0];
 const norm = t => (t || '').replace(/\\s+/g, ' ').trim().toLowerCase();
 const visivel = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
-const achados = [...document.querySelectorAll('a, button, input, label, span, div, li')]
-  .filter(e => visivel(e) && (norm(e.textContent) === alvo || norm(e.value) === alvo));
+const tem = e => norm(e.textContent).includes(alvo) || norm(e.value).includes(alvo);
+const achados = [...document.querySelectorAll('a, button, input, label, span, div, li, p')].filter(tem);
 const internos = achados.filter(e => !achados.some(o => o !== e && e.contains(o)));
-const el = internos[0];
+const el = internos.find(visivel) || internos[0];
 if (!el) return null;
 return el.closest('a, button, label, [role=button], [onclick]') || el;
 """
@@ -219,14 +221,21 @@ class Plataforma:
             d.get(url)
         else:
             self._ir_para_usuarios()
-        botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "importar arquivo") or False,
-                              o_que=f"o botão \"Importar Arquivo\" na tela de {o_que}")
-        d.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
-        try:
-            botao.click()
-        except WebDriverException:  # coberto por outro elemento (aviso, menu): clica via JS
-            d.execute_script("arguments[0].click();", botao)
-        self._aceitar_alerta(5)  # "Selecione um arquivo no formato .csv..."
+        botao = self._achar_botao_importar()
+        if botao:
+            d.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
+            try:
+                botao.click()
+            except WebDriverException:  # coberto por outro elemento (aviso, menu): clica via JS
+                d.execute_script("arguments[0].click();", botao)
+            self._aceitar_alerta(5)  # "Selecione um arquivo no formato .csv..."
+        elif d.find_elements(By.CSS_SELECTOR, "input[type='file']"):
+            self.log("Botão \"Importar Arquivo\" não encontrado; usando direto o campo de arquivo da página.")
+        else:
+            pasta = self.salvar_diagnostico(f"botão Importar Arquivo ({o_que})")
+            raise ErroPlataforma(
+                f"Não encontrei o botão \"Importar Arquivo\" na tela de {o_que} na página {d.current_url}\n\n"
+                f"Print e resumo da página salvos em:\n{pasta}")
 
         entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")),
                                 o_que=f"o campo de arquivo da importação de {o_que}")
@@ -243,6 +252,28 @@ class Plataforma:
         mensagem = self._mensagem_resultado()
         self.log(f"Resultado ({o_que}): {mensagem}")
         return mensagem
+
+    def _achar_botao_importar(self):
+        """Procura o botão na página e, se não achar, dentro de iframes."""
+        d = self.driver
+        fim = time.time() + self.espera
+        while time.time() < fim:
+            d.switch_to.default_content()
+            botao = d.execute_script(_JS_ACHAR_BOTAO, "importar arquivo")
+            if botao:
+                return botao
+            for quadro in d.find_elements(By.TAG_NAME, "iframe"):
+                try:
+                    d.switch_to.frame(quadro)
+                    botao = d.execute_script(_JS_ACHAR_BOTAO, "importar arquivo")
+                    if botao:
+                        return botao  # fica dentro do iframe para o resto da importação
+                except WebDriverException:
+                    pass
+                d.switch_to.default_content()
+            time.sleep(1)
+        d.switch_to.default_content()
+        return None
 
     def _aceitar_alerta(self, tempo: int) -> str | None:
         try:
