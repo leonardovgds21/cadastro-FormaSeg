@@ -268,7 +268,9 @@ class App(tk.Tk):
         except ErroPlataforma as erro:
             self.fila.put(("erro", str(erro)))
         except Exception as erro:  # qualquer falha inesperada do navegador
-            self.fila.put(("erro", f"{type(erro).__name__}: {erro}"))
+            # A mensagem do Selenium traz um stacktrace sem utilidade; fica só a 1ª linha.
+            detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
+            self.fila.put(("erro", f"{type(erro).__name__}: {detalhe[0] if detalhe else 'sem detalhes'}"))
         finally:
             self.fila.put(("liberar", None))
 

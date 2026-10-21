@@ -11,6 +11,7 @@ controlado pelo Selenium. O fluxo é o mesmo que a pessoa faz na mão:
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -21,7 +22,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from .config import URL_PAINEL
+from .config import URL_PAINEL, pasta_dados
 from .gerador import sem_acento
 
 URL_BASE = URL_PAINEL.split("/painel")[0]
@@ -70,15 +71,51 @@ class Plataforma:
                 erros.append(f"{nome}: {erro.msg}")
         raise ErroPlataforma("Não consegui abrir o Edge nem o Chrome.\n" + "\n".join(erros))
 
-    def _esperar(self, condicao, tempo: int | None = None):
-        return WebDriverWait(self.driver, tempo or self.espera).until(condicao)
+    def _esperar(self, condicao, tempo: int | None = None, o_que: str | None = None):
+        """Espera a condição. Com `o_que`, um tempo esgotado vira um erro claro
+        dizendo o que faltou, com print e resumo da página salvos em dados/erros."""
+        try:
+            return WebDriverWait(self.driver, tempo or self.espera).until(condicao)
+        except TimeoutException:
+            if not o_que:
+                raise
+            pasta = self.salvar_diagnostico(o_que)
+            raise ErroPlataforma(
+                f"Não encontrei {o_que} na página {self.driver.current_url}\n\n"
+                f"Print e resumo da página salvos em:\n{pasta}"
+            ) from None
+
+    def salvar_diagnostico(self, etapa: str) -> Path | None:
+        """Salva um print da tela e a lista de campos e botões da página."""
+        d = self.driver
+        try:
+            pasta = pasta_dados() / "erros"
+            pasta.mkdir(parents=True, exist_ok=True)
+            base = pasta / datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            d.save_screenshot(str(base.with_suffix(".png")))
+            linhas = [f"Etapa: {etapa}", f"URL: {d.current_url}", f"Título: {d.title}", "", "Campos:"]
+            for e in d.find_elements(By.CSS_SELECTOR, "input, select, textarea"):
+                linhas.append(
+                    f"  <{e.tag_name} type={e.get_attribute('type')} name={e.get_attribute('name')} "
+                    f"id={e.get_attribute('id')} placeholder={e.get_attribute('placeholder')} "
+                    f"visível={e.is_displayed()}>")
+            linhas += ["", "Botões e links:"]
+            for e in d.find_elements(By.CSS_SELECTOR, "button, a, input[type='submit']"):
+                texto = (e.text or e.get_attribute("value") or "").strip().replace("\n", " ")
+                if texto:
+                    linhas.append(f"  <{e.tag_name}> {texto[:60]}  href={e.get_attribute('href')}")
+            base.with_suffix(".txt").write_text("\n".join(linhas), encoding="utf-8")
+            return base.with_suffix(".png")
+        except Exception:  # o diagnóstico nunca pode esconder o erro original
+            return None
 
     # ---------- login ----------
     def login(self, usuario: str, senha: str) -> None:
         d = self.driver
         self.log("Entrando no painel...")
         d.get(URL_PAINEL)
-        campo_senha = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']")))
+        campo_senha = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='password']")),
+                                   o_que="o campo de senha do login")
         form = campo_senha.find_element(By.XPATH, "./ancestor::form[1]")
         campo_usuario = form.find_element(
             By.CSS_SELECTOR, "input[type='text'], input[type='email'], input[name='username'], input[name='log']")
@@ -104,7 +141,8 @@ class Plataforma:
             return
         d.get(URL_MATRICULAS)
         link = self._esperar(EC.presence_of_element_located(
-            (By.XPATH, "//a[contains(@href, '/dash/')][normalize-space()='Usuários']")))
+            (By.XPATH, "//a[contains(@href, '/dash/')][normalize-space()='Usuários']")),
+            o_que="o link \"Usuários\" do menu lateral (o login pode não ter entrado na área administrativa)")
         self.url_usuarios = link.get_attribute("href")
         d.get(self.url_usuarios)
 
@@ -121,7 +159,8 @@ class Plataforma:
         for email, nome in alunos:
             self._ir_para_usuarios()
             busca = self._esperar(EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder*='Pesquisar por usu']")))
+                (By.CSS_SELECTOR, "input[placeholder*='Pesquisar por usu']")),
+                o_que="o campo \"Pesquisar por usuário\"")
             busca.clear()
             busca.send_keys(email)
             botoes = d.find_elements(By.XPATH, "//button[normalize-space()='Selecionar']")
@@ -153,16 +192,18 @@ class Plataforma:
         else:
             self._ir_para_usuarios()
         botao = self._esperar(EC.element_to_be_clickable(
-            (By.XPATH, "//*[self::a or self::button][normalize-space()='Importar Arquivo']")))
+            (By.XPATH, "//*[self::a or self::button][normalize-space()='Importar Arquivo']")),
+            o_que=f"o botão \"Importar Arquivo\" na tela de {o_que}")
         d.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
         botao.click()
         self._aceitar_alerta(5)  # "Selecione um arquivo no formato .csv..."
 
-        entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")))
+        entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")),
+                                o_que=f"o campo de arquivo da importação de {o_que}")
         entrada.send_keys(str(Path(csv).resolve()))
         self.log(f"Arquivo {Path(csv).name} enviado, aguardando a confirmação...")
 
-        alerta = self._esperar(EC.alert_is_present(), 20)  # "Ao prosseguir a importação..."
+        alerta = self._esperar(EC.alert_is_present(), 20, o_que=f"a confirmação da importação de {o_que}")  # "Ao prosseguir a importação..."
         if not confirmar:
             alerta.dismiss()
             self.log(f"Modo teste: importação de {o_que} cancelada antes de confirmar.")
