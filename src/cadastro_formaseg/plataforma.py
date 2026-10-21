@@ -221,28 +221,35 @@ class Plataforma:
             d.get(url)
         else:
             self._ir_para_usuarios()
-        botao = self._achar_botao_importar()
-        if botao:
+        # A página já traz o campo de arquivo escondido (ex.: <input type=file
+        # id=users_csv>). Enviar o arquivo direto nele evita abrir a janela
+        # "Abrir arquivo" do Windows, que o navegador automatizado não controla.
+        # Se a página não pedir a confirmação assim, tenta pelo botão.
+        alerta = None
+        if self._tem_campo_arquivo():
+            alerta = self._enviar_arquivo(csv, tempo=15)
+            if not alerta:
+                self.log("A página não pediu confirmação; tentando pelo botão \"Importar Arquivo\"...")
+        if not alerta:
+            botao = self._achar_botao_importar()
+            if not botao:
+                pasta = self.salvar_diagnostico(f"botão Importar Arquivo ({o_que})")
+                raise ErroPlataforma(
+                    f"Não encontrei o botão \"Importar Arquivo\" na tela de {o_que} "
+                    f"na página {d.current_url}\n\nPrint e resumo da página salvos em:\n{pasta}")
             d.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
             try:
                 botao.click()
             except WebDriverException:  # coberto por outro elemento (aviso, menu): clica via JS
                 d.execute_script("arguments[0].click();", botao)
             self._aceitar_alerta(5)  # "Selecione um arquivo no formato .csv..."
-        elif d.find_elements(By.CSS_SELECTOR, "input[type='file']"):
-            self.log("Botão \"Importar Arquivo\" não encontrado; usando direto o campo de arquivo da página.")
-        else:
-            pasta = self.salvar_diagnostico(f"botão Importar Arquivo ({o_que})")
+            alerta = self._enviar_arquivo(csv, tempo=20)
+        if not alerta:
+            pasta = self.salvar_diagnostico(f"confirmação da importação ({o_que})")
             raise ErroPlataforma(
-                f"Não encontrei o botão \"Importar Arquivo\" na tela de {o_que} na página {d.current_url}\n\n"
+                f"Enviei o arquivo, mas a plataforma não pediu a confirmação da importação de {o_que}.\n\n"
                 f"Print e resumo da página salvos em:\n{pasta}")
 
-        entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")),
-                                o_que=f"o campo de arquivo da importação de {o_que}")
-        entrada.send_keys(str(Path(csv).resolve()))
-        self.log(f"Arquivo {Path(csv).name} enviado, aguardando a confirmação...")
-
-        alerta = self._esperar(EC.alert_is_present(), 20, o_que=f"a confirmação da importação de {o_que}")  # "Ao prosseguir a importação..."
         if not confirmar:
             alerta.dismiss()
             self.log(f"Modo teste: importação de {o_que} cancelada antes de confirmar.")
@@ -252,6 +259,28 @@ class Plataforma:
         mensagem = self._mensagem_resultado()
         self.log(f"Resultado ({o_que}): {mensagem}")
         return mensagem
+
+    def _enviar_arquivo(self, csv: Path, tempo: int):
+        """Coloca o CSV no campo de arquivo e devolve o alerta de confirmação (ou None)."""
+        try:  # a confirmação pode já ter aparecido (campo preenchido numa tentativa anterior)
+            return self.driver.switch_to.alert
+        except NoAlertPresentException:
+            pass
+        entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")),
+                                o_que="o campo de arquivo da importação")
+        entrada.send_keys(str(Path(csv).resolve()))
+        self.log(f"Arquivo {Path(csv).name} enviado, aguardando a confirmação...")
+        try:
+            return self._esperar(EC.alert_is_present(), tempo)  # "Ao prosseguir a importação..."
+        except TimeoutException:
+            return None
+
+    def _tem_campo_arquivo(self) -> bool:
+        try:
+            self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")), 10)
+            return True
+        except TimeoutException:
+            return False
 
     def _achar_botao_importar(self):
         """Procura o botão na página e, se não achar, dentro de iframes."""
