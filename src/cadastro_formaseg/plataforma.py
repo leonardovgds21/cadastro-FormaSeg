@@ -140,9 +140,22 @@ class Plataforma:
             d.get(self.url_usuarios)
             return
         d.get(URL_MATRICULAS)
-        link = self._esperar(EC.presence_of_element_located(
-            (By.XPATH, "//a[contains(@href, '/dash/')][normalize-space()='Usuários']")),
-            o_que="o link \"Usuários\" do menu lateral (o login pode não ter entrado na área administrativa)")
+        if d.find_elements(By.CSS_SELECTOR, "input[type='password']"):
+            self.salvar_diagnostico("abrir a área administrativa")
+            raise ErroPlataforma(
+                "A plataforma voltou para a tela de login ao abrir a área administrativa. "
+                "Confira o usuário e a senha (use \"Esquecer login salvo\" e digite de novo).")
+        # O item do menu pode ter ícone, espaços ou ficar dentro do submenu
+        # "Usuários e Matrículas"; pega o link cujo texto contém "Usuários" sem "Matrículas".
+        link = self._esperar(
+            lambda drv: next(
+                (e for e in drv.find_elements(By.XPATH, "//a[contains(normalize-space(.), 'Usu')]")
+                 if "matr" not in sem_acento(e.get_attribute("textContent") or "").lower()
+                 and "usuario" in sem_acento(e.get_attribute("textContent") or "").lower()
+                 and (e.get_attribute("href") or "").startswith("http")
+                 and "#" not in (e.get_attribute("href") or "")),
+                False),
+            o_que="o link \"Usuários\" do menu lateral")
         self.url_usuarios = link.get_attribute("href")
         d.get(self.url_usuarios)
 
