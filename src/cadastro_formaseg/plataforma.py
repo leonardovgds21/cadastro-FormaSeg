@@ -10,6 +10,7 @@ controlado pelo Selenium. O fluxo é o mesmo que a pessoa faz na mão:
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -177,35 +178,53 @@ class Plataforma:
         d.get(self.url_usuarios)
 
     # ---------- consulta ----------
-    def emails_existentes(self, alunos: list[tuple[str, str]]) -> set[str]:
-        """Recebe (e-mail, nome completo) e devolve os e-mails que já existem.
+    def emails_existentes(self, emails: list[str]) -> set[str]:
+        """Devolve os e-mails da lista que já existem na plataforma.
 
-        A listagem mostra só nomes, então a busca é pelo e-mail e o resultado
-        só conta se a linha tiver o primeiro e o último nome da pessoa. Assim,
-        se a busca não filtrar, a lista inteira não vira "já existe".
+        A busca "Pesquisar por usuário" da tela de Usuários é uma lista com
+        pesquisa (select2): digita o e-mail e lê as opções, que mostram
+        "NOME (#id – e-mail)". Conta como existente só se o e-mail aparecer
+        exatamente numa opção.
         """
-        d = self.driver
         existentes = set()
-        for email, nome in alunos:
+        for email in emails:
             self._ir_para_usuarios()
-            busca = self._esperar(EC.presence_of_element_located(
-                (By.CSS_SELECTOR, "input[placeholder*='Pesquisar por usu']")),
-                o_que="o campo \"Pesquisar por usuário\"")
-            busca.clear()
-            busca.send_keys(email)
-            botoes = d.find_elements(By.XPATH, "//button[normalize-space()='Selecionar']")
-            if botoes:
-                botoes[0].click()
-            else:
-                busca.send_keys(Keys.ENTER)
-            time.sleep(3)
-            partes = sem_acento(nome).lower().split()
-            for linha in d.find_elements(By.CSS_SELECTOR, "table tbody tr"):
-                texto = sem_acento(linha.text).lower()
-                if partes and partes[0] in texto and partes[-1] in texto:
-                    existentes.add(email)
-                    break
+            exato = re.compile(r"(?<![\w.@+-])" + re.escape(email.lower()) + r"(?![\w.@+-])")
+            if exato.search(self._opcoes_da_busca(email)):
+                existentes.add(email)
         return existentes
+
+    def _opcoes_da_busca(self, termo: str) -> str:
+        """Digita o termo na busca de usuários e devolve o texto das opções (minúsculo)."""
+        d = self.driver
+        lista = self._esperar(EC.presence_of_element_located(
+            (By.CSS_SELECTOR, "#dashlifter-filter-customer, select[name='customer_id']")),
+            o_que="a busca \"Pesquisar por usuário\"")
+        caixa = lista.find_element(By.XPATH, "following-sibling::span[contains(@class, 'select2')][1]"
+                                             "//*[contains(@class, 'select2-selection')]")
+        d.execute_script("arguments[0].scrollIntoView({block: 'center'});", caixa)
+        caixa.click()
+        campo = self._esperar(EC.visibility_of_element_located(
+            (By.CSS_SELECTOR, ".select2-container--open .select2-search__field")),
+            o_que="o campo de digitação da busca \"Pesquisar por usuário\"")
+        campo.clear()
+        campo.send_keys(termo)
+
+        def carregou(drv):
+            opcoes = drv.find_elements(By.CSS_SELECTOR, ".select2-container--open .select2-results__option")
+            textos = []
+            for o in opcoes:
+                classes = o.get_attribute("class") or ""
+                texto = (o.text or "").strip().lower()
+                if "loading-results" in classes or not texto or any(
+                        p in texto for p in ("pesquisando", "searching", "carregando", "loading", "digite", "please enter")):
+                    return False
+                textos.append(texto)
+            return "\n".join(textos) if textos else False
+
+        texto = self._esperar(carregou, 20, o_que=f"o resultado da busca por {termo}")
+        campo.send_keys(Keys.ESCAPE)
+        return texto
 
     # ---------- importação ----------
     def importar_usuarios(self, csv: Path, confirmar: bool = True) -> str:

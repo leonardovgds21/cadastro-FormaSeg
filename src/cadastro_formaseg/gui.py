@@ -251,11 +251,15 @@ class App(tk.Tk):
                 p.login(usuario, senha)
                 log("Conferindo se os e-mails já existem na plataforma...")
                 try:
-                    existentes = p.emails_existentes([(a.email, f"{a.nome} {a.sobrenome}") for a in self.alunos])
+                    existentes = p.emails_existentes([a.email for a in self.alunos])
                 except ErroPlataforma as erro:
-                    if not teste:
-                        raise
-                    log(f"AVISO (modo teste, seguindo adiante): {erro}")
+                    log(f"AVISO: {erro}")
+                    if not teste and not self._perguntar(
+                            "Não consegui conferir se os e-mails já existem na plataforma.\n\n"
+                            "Se algum já existir, a importação pode alterar o cadastro dessa pessoa.\n\n"
+                            "Continuar mesmo assim?"):
+                        log("Envio cancelado.")
+                        return
                     existentes = set()
                 if existentes:
                     self.fila.put(("conflito", existentes))
@@ -280,6 +284,12 @@ class App(tk.Tk):
         finally:
             self.fila.put(("liberar", None))
 
+    def _perguntar(self, texto: str) -> bool:
+        """Faz uma pergunta Sim/Não na tela a partir da tarefa em segundo plano."""
+        resposta: queue.Queue = queue.Queue()
+        self.fila.put(("perguntar", (texto, resposta)))
+        return resposta.get()
+
     def _aguardar_csvs(self) -> Path | None:
         resposta: queue.Queue = queue.Queue()
         self._resposta_csv = resposta
@@ -293,6 +303,9 @@ class App(tk.Tk):
                     self.escrever(dado)
                 elif tipo == "gerar":
                     self._resposta_csv.put(self.gerar_csvs())
+                elif tipo == "perguntar":
+                    texto, resposta = dado
+                    resposta.put(messagebox.askyesno("Conferência de e-mails", texto))
                 elif tipo == "conflito":
                     self._resolver_conflitos(dado)
                 elif tipo == "erro":
