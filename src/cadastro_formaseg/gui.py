@@ -250,7 +250,13 @@ class App(tk.Tk):
             with Plataforma(log=log, visivel=visivel) as p:
                 p.login(usuario, senha)
                 log("Conferindo se os e-mails já existem na plataforma...")
-                existentes = p.emails_existentes([(a.email, f"{a.nome} {a.sobrenome}") for a in self.alunos])
+                try:
+                    existentes = p.emails_existentes([(a.email, f"{a.nome} {a.sobrenome}") for a in self.alunos])
+                except ErroPlataforma as erro:
+                    if not teste:
+                        raise
+                    log(f"AVISO (modo teste, seguindo adiante): {erro}")
+                    existentes = set()
                 if existentes:
                     self.fila.put(("conflito", existentes))
                     return
@@ -268,7 +274,9 @@ class App(tk.Tk):
         except ErroPlataforma as erro:
             self.fila.put(("erro", str(erro)))
         except Exception as erro:  # qualquer falha inesperada do navegador
-            self.fila.put(("erro", f"{type(erro).__name__}: {erro}"))
+            # A mensagem do Selenium traz um stacktrace sem utilidade; fica só a 1ª linha.
+            detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
+            self.fila.put(("erro", f"{type(erro).__name__}: {detalhe[0] if detalhe else 'sem detalhes'}"))
         finally:
             self.fila.put(("liberar", None))
 
