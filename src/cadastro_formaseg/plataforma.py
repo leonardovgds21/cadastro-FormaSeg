@@ -30,6 +30,21 @@ URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
 
 Log = Callable[[str], None]
 
+# Acha o elemento visível cujo texto (ou value) é o procurado, ignorando
+# maiúsculas, espaços e ícones; serve para <a>, <button>, <input>, <label>,
+# <span> etc. Entre vários, fica o mais interno (o próprio botão).
+_JS_ACHAR_BOTAO = """
+const alvo = arguments[0];
+const norm = t => (t || '').replace(/\\s+/g, ' ').trim().toLowerCase();
+const visivel = e => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+const achados = [...document.querySelectorAll('a, button, input, label, span, div, li')]
+  .filter(e => visivel(e) && (norm(e.textContent) === alvo || norm(e.value) === alvo));
+const internos = achados.filter(e => !achados.some(o => o !== e && e.contains(o)));
+const el = internos[0];
+if (!el) return null;
+return el.closest('a, button, label, [role=button], [onclick]') || el;
+"""
+
 
 class ErroPlataforma(Exception):
     pass
@@ -204,11 +219,13 @@ class Plataforma:
             d.get(url)
         else:
             self._ir_para_usuarios()
-        botao = self._esperar(EC.element_to_be_clickable(
-            (By.XPATH, "//*[self::a or self::button][normalize-space()='Importar Arquivo']")),
-            o_que=f"o botão \"Importar Arquivo\" na tela de {o_que}")
+        botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "importar arquivo") or False,
+                              o_que=f"o botão \"Importar Arquivo\" na tela de {o_que}")
         d.execute_script("arguments[0].scrollIntoView({block: 'center'});", botao)
-        botao.click()
+        try:
+            botao.click()
+        except WebDriverException:  # coberto por outro elemento (aviso, menu): clica via JS
+            d.execute_script("arguments[0].click();", botao)
         self._aceitar_alerta(5)  # "Selecione um arquivo no formato .csv..."
 
         entrada = self._esperar(EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='file']")),
@@ -246,9 +263,12 @@ class Plataforma:
                 return texto_alerta
             except NoAlertPresentException:
                 pass
-            avisos = self.driver.find_elements(
-                By.CSS_SELECTOR, ".alert, .notice, .updated, .woocommerce-message, .woocommerce-error, [role='alert']")
-            textos = [a.text.strip() for a in avisos if a.is_displayed() and a.text.strip()]
+            try:
+                avisos = self.driver.find_elements(
+                    By.CSS_SELECTOR, ".alert, .notice, .updated, .woocommerce-message, .woocommerce-error, [role='alert']")
+                textos = [a.text.strip() for a in avisos if a.is_displayed() and a.text.strip()]
+            except WebDriverException:  # a página recarregou no meio da leitura; tenta de novo
+                textos = []
             if textos:
                 return " | ".join(textos)
             time.sleep(1)
