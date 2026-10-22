@@ -17,6 +17,7 @@ Copie a pasta `executavel/CadastroFormaSeg` para o computador e abra
 | `src/cadastro_formaseg/ficha.py` | Lê o PDF (um colaborador por página) |
 | `src/cadastro_formaseg/gerador.py` | Regras de e-mail/senha e CSVs `import.csv` e `import-curso.csv` |
 | `src/cadastro_formaseg/gui.py` | Tela (Tkinter) |
+| `src/cadastro_formaseg/email_alunos.py` | E-mail aos alunos (link mailto: para o Outlook) |
 | `src/cadastro_formaseg/plataforma.py` | Login e importação no painel (Selenium + Edge) |
 | `src/cadastro_formaseg/credenciais.py` | Login no Cofre de Credenciais do Windows |
 | `config/cursos.json` | Lista de treinamentos (nome e ID) |
