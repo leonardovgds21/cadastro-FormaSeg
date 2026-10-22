@@ -18,9 +18,11 @@ Como usar
    momento: para avisar quem já foi cadastrado, abra a ficha de novo,
    escolha o treinamento e clique só neste botão). Quem já foi cadastrado
    neste computador volta com o mesmo e-mail, com o aviso "já cadastrado
-   em <data>". Abre um e-mail
-   novo no Outlook com os alunos no campo Para, assunto e texto com o nome
-   do treinamento. Confira e clique em Enviar no Outlook.
+   em <data>". Abre um e-mail novo no Outlook com os alunos no campo
+   Para e o texto padrão, com os treinamentos e a data de hoje como Data
+   de Início. Se os alunos estão em treinamentos diferentes, abre um
+   e-mail para cada treinamento. Quem está sem treinamento fica de fora.
+   Confira e clique em Enviar no Outlook.
    - Se abrir outro programa, em Configurações > Aplicativos > Aplicativos
      padrão, escolha o Outlook (novo) para o tipo de link MAILTO.
    - Os e-mails dos alunos também ficam copiados (Ctrl+V), por exemplo

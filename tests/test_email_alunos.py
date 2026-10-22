@@ -1,37 +1,44 @@
 from urllib.parse import unquote
 
-from cadastro_formaseg.email_alunos import LIMITE_MAILTO, link_mailto, montar_email, preparar_link
+from cadastro_formaseg.email_alunos import LIMITE_MAILTO, link_mailto, montar_emails, preparar_link
 from cadastro_formaseg.gerador import Aluno
 
-CURSOS = {"82557": "NR 33 – Vigia", "84075": "NR 06 – EPI"}
+CURSOS = {"82853": "NR 33 – Supervisor de Entrada – Teórico", "74122": "NR 18 – Integração (16 horas)"}
 
 
 def aluno(nome, email, cursos=()):
     return Aluno(nome=nome, sobrenome="Souza", cpf="", email=email, cursos=list(cursos))
 
 
-def test_mesmo_treinamento():
-    para, assunto, corpo = montar_email(
-        [aluno("Maria", "maria.souza@x.com", ["82557"]), aluno("Ana", "ana.souza@x.com", ["82557"])], CURSOS)
-    assert para == ["maria.souza@x.com", "ana.souza@x.com"]
-    assert assunto == "Cadastro no treinamento: NR 33 – Vigia"
-    assert "matriculado(a) no treinamento NR 33 – Vigia." in corpo
-    assert "Senha: o seu CPF" in corpo
+def test_texto_padrao_com_treinamentos_e_data():
+    emails, sem = montar_emails(
+        [aluno("Maria", "maria@x.com", ["82853", "74122"]), aluno("Ana", "ana@x.com", ["82853", "74122"])],
+        CURSOS, "22/10/2026")
+    assert not sem and len(emails) == 1
+    e = emails[0]
+    assert e.destinatarios == ["maria@x.com", "ana@x.com"]
+    assert e.assunto == "Treinamentos para atualização do certificado"
+    assert e.corpo.startswith("Olá!\n\nSegue treinamentos para atualização do certificado!")
+    assert "lhe inscreveu no curso de:\n\n• NR 33 – Supervisor de Entrada – Teórico\n• NR 18 – Integração (16 horas)\n" in e.corpo
+    assert "Data de Início: 22/10/2026" in e.corpo
+    assert "• Acesse: https://gapgestao.sstnr.com/painel/" in e.corpo
+    assert "exigências do Ministério do Trabalho" in e.corpo  # sem quebra de linha no meio
+    assert e.corpo.endswith("Qualquer dúvida entre em contato conosco.")
 
 
-def test_sem_matricula():
-    _, assunto, corpo = montar_email([aluno("Maria", "m@x.com")], CURSOS)
-    assert assunto == "Cadastro na plataforma FormaSeg"
-    assert "matriculado" not in corpo
+def test_um_email_por_treinamento_e_sem_matricula_fica_fora():
+    emails, sem = montar_emails(
+        [aluno("Maria", "m@x.com", ["82853"]), aluno("Ana", "a@x.com", ["74122"]),
+         aluno("Rui", "r@x.com"), aluno("Lia", "l@x.com", ["82853"])], CURSOS, "22/10/2026")
+    assert [e.destinatarios for e in emails] == [["m@x.com", "l@x.com"], ["a@x.com"]]
+    assert [a.nome for a in sem] == ["Rui"]
 
 
-def test_treinamentos_diferentes_lista_por_aluno():
-    _, _, corpo = montar_email(
-        [aluno("Maria", "m@x.com", ["82557"]), aluno("Ana", "a@x.com", ["84075"]), aluno("Rui", "r@x.com")],
-        CURSOS)
-    assert "- Maria Souza: NR 33 – Vigia" in corpo
-    assert "- Ana Souza: NR 06 – EPI" in corpo
-    assert "- Rui Souza: somente cadastro" in corpo
+def test_texto_padrao_cabe_no_link_com_alguns_alunos():
+    alunos = [aluno("A", f"fulano.sobrenome{i}@gapgestao.com.br", ["82853", "74122"]) for i in range(5)]
+    e = montar_emails(alunos, CURSOS, "22/10/2026")[0][0]
+    _, dest, corpo = preparar_link(e.destinatarios, e.assunto, e.corpo)
+    assert dest and corpo
 
 
 def test_link_mailto():
