@@ -6,10 +6,14 @@ controlado pelo Selenium. O fluxo é o mesmo que a pessoa faz na mão:
 1. Login em /painel/.
 2. Usuários -> "Importar Arquivo" -> aviso (OK) -> arquivo -> confirmação (OK).
 3. Matrículas -> o mesmo, com o import-curso.csv.
+
+Monitoramento: Matrículas -> "Exportar Matriculas" (lista com o progresso) e,
+para quem concluiu, pesquisa o aluno -> Ações -> "Ver Certificado" -> PDF.
 """
 
 from __future__ import annotations
 
+import base64
 import re
 import time
 from datetime import datetime
@@ -30,6 +34,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from .config import URL_PAINEL, pasta_dados
 from .gerador import sem_acento
+from .monitoramento import Matricula, ler_progresso, normalizar
 
 URL_BASE = URL_PAINEL.split("/painel")[0]
 URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
@@ -65,6 +70,7 @@ class Plataforma:
         self.espera = espera
         self.driver: webdriver.Remote | None = None
         self.url_usuarios: str | None = None
+        self.pasta_downloads = pasta_dados() / "downloads"
 
     # ---------- navegador ----------
     def __enter__(self):
@@ -86,6 +92,11 @@ class Plataforma:
                 opcoes.add_argument("--headless=new")
             opcoes.add_argument("--window-size=1400,1000")
             opcoes.add_argument("--lang=pt-BR")
+            opcoes.add_experimental_option("prefs", {
+                "download.default_directory": str(self.pasta_downloads),
+                "download.prompt_for_download": False,
+                "plugins.always_open_pdf_externally": True,
+            })
             try:
                 driver = classe(options=opcoes)
                 self.log(f"Navegador {nome} aberto{' (invisível)' if not self.visivel else ''}.")
@@ -381,3 +392,302 @@ class Plataforma:
                 return " | ".join(textos)
             time.sleep(1)
         return "sem mensagem da plataforma (confira no painel)"
+
+    # ---------- monitoramento ----------
+    def exportar_matriculas(self) -> Path:
+        """Clica em "Exportar Matriculas", escolhe CSV (ou Excel) e devolve o arquivo baixado."""
+        d = self.driver
+        self.log("Abrindo Matrículas para exportar a lista...")
+        d.get(URL_MATRICULAS)
+        self._liberar_downloads()
+        for velho in self.pasta_downloads.iterdir():  # fica só a lista mais recente
+            try:
+                velho.unlink()
+            except OSError:
+                pass
+        antes = set(self.pasta_downloads.iterdir())
+        botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "exportar matriculas")
+                              or drv.execute_script(_JS_ACHAR_BOTAO, "exportar matrículas"),
+                              o_que="o botão \"Exportar Matriculas\"")
+        visiveis_antes = set(self._clicaveis_visiveis())
+        self._clicar(botao)
+        time.sleep(1)
+        opcoes = [e for e in self._clicaveis_visiveis() if e not in visiveis_antes and e != botao]
+        textos = [(e.text or "").strip() for e in opcoes]
+        if textos:
+            self.log(f"Opções de exportação: {', '.join(t for t in textos if t)}")
+        escolhida = None
+        for chave in ("csv", "excel", "xlsx", "xls", "planilha"):
+            escolhida = next((e for e, t in zip(opcoes, textos) if chave in t.lower()), None)
+            if escolhida:
+                break
+        if not escolhida:
+            escolhida = next((e for e, t in zip(opcoes, textos) if t and "pdf" not in t.lower()), None)
+        if escolhida:
+            self.log(f"Exportando: {escolhida.text.strip()}")
+            self._clicar(escolhida)
+        janela = d.current_window_handle
+        arquivo = self._esperar_download(antes, 90)
+        for aba in d.window_handles:  # a exportação pode abrir uma aba à toa
+            if aba != janela:
+                d.switch_to.window(aba)
+                d.close()
+        d.switch_to.window(janela)
+        if not arquivo:
+            pasta = self.salvar_diagnostico("exportar matrículas")
+            raise ErroPlataforma(
+                "Cliquei em \"Exportar Matriculas\", mas nenhum arquivo foi baixado.\n\n"
+                f"Print e resumo da página salvos em:\n{pasta}")
+        self.log(f"Lista exportada: {arquivo.name}")
+        return arquivo
+
+    def _liberar_downloads(self):
+        self.pasta_downloads.mkdir(parents=True, exist_ok=True)
+        for comando, parametros in [
+            ("Browser.setDownloadBehavior", {"behavior": "allow", "downloadPath": str(self.pasta_downloads)}),
+            ("Page.setDownloadBehavior", {"behavior": "allow", "downloadPath": str(self.pasta_downloads)}),
+        ]:
+            try:
+                self.driver.execute_cdp_cmd(comando, parametros)
+                return
+            except WebDriverException:
+                continue
+
+    def _esperar_download(self, antes: set[Path], tempo: int) -> Path | None:
+        fim = time.time() + tempo
+        while time.time() < fim:
+            novos = [a for a in self.pasta_downloads.iterdir()
+                     if a not in antes and a.is_file() and a.suffix.lower() not in (".crdownload", ".tmp", ".partial")]
+            if novos and not any(a.suffix.lower() == ".crdownload" for a in self.pasta_downloads.iterdir()):
+                time.sleep(1)  # termina de gravar
+                return max(novos, key=lambda a: a.stat().st_mtime)
+            time.sleep(1)
+        return None
+
+    def _clicaveis_visiveis(self) -> list:
+        return self.driver.execute_script(
+            "return [...document.querySelectorAll('a, button, li, [role=menuitem], .dropdown-item')]"
+            ".filter(e => (e.offsetWidth || e.offsetHeight) && (e.textContent || '').trim()"
+            " && !e.querySelector('a, button'));")
+
+    def _clicar(self, elemento):
+        self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", elemento)
+        try:
+            elemento.click()
+        except WebDriverException:  # coberto por outro elemento: clica via JS
+            self.driver.execute_script("arguments[0].click();", elemento)
+
+    def matriculas_do_aluno(self, nome: str, email: str = "") -> list[Matricula]:
+        """Pesquisa o aluno em Matrículas e lê a tabela (aluno, curso, progresso)."""
+        return [Matricula(a, c, ler_progresso(p), p) for a, c, p, _ in self._pesquisar_aluno(nome, email)]
+
+    def _pesquisar_aluno(self, nome: str, email: str = "") -> list[list[str]]:
+        d = self.driver
+        d.get(URL_MATRICULAS)
+        lista = self._esperar(lambda drv: self._filtro_aluno(), o_que="a busca por aluno em Matrículas")
+        if not self._escolher_no_select2(lista, email or nome, nome, email):
+            if not email or not self._escolher_no_select2(lista, nome, nome, ""):
+                return []
+        botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "pesquisar matriculas")
+                              or drv.execute_script(_JS_ACHAR_BOTAO, "pesquisar matrículas"),
+                              o_que="o botão \"Pesquisar Matriculas\"")
+        alvo = normalizar(nome)
+        tabela_antes = d.execute_script("return document.querySelector('table tbody');")
+        self._clicar(botao)
+
+        def leu(drv):
+            try:
+                recarregou = not tabela_antes or not drv.execute_script(
+                    "return document.contains(arguments[0]);", tabela_antes)
+            except WebDriverException:  # a referência antiga ficou obsoleta: a página recarregou
+                recarregou = True
+            try:
+                linhas = drv.execute_script(_JS_LINHAS_MATRICULAS)
+            except WebDriverException:
+                return False
+            if linhas is None:
+                return False
+            # sem recarregar, a tabela é trocada por AJAX: espera mostrar só o aluno
+            if recarregou or (linhas and all(normalizar(l[0]) == alvo for l in linhas)):
+                return ("ok", linhas)
+            return False
+
+        try:
+            _, linhas = self._esperar(leu, 30)
+        except TimeoutException:
+            linhas = d.execute_script(_JS_LINHAS_MATRICULAS) or []
+        return [l for l in linhas if normalizar(l[0]) == alvo] or linhas
+
+    def _filtro_aluno(self):
+        """A lista com pesquisa (select2) de aluno/usuário do filtro de Matrículas."""
+        return self.driver.execute_script("""
+            const sels = [...document.querySelectorAll('select')];
+            const por = f => sels.find(f);
+            const txt = s => { const c = s.nextElementSibling; return ((c && c.textContent) || '') + ' '
+                + (s.getAttribute('data-placeholder') || '') + ' ' + (s.name || '') + ' ' + (s.id || ''); };
+            return por(s => s.id === 'dashlifter-filter-customer' || s.name === 'customer_id')
+                || por(s => /customer|student|aluno|user/i.test((s.id || '') + ' ' + (s.name || '')))
+                || por(s => /usu[aá]rio|aluno|colaborador/i.test(txt(s)) && !/empresa|filial/i.test(txt(s)))
+                || null;""")
+
+    def _escolher_no_select2(self, lista, termo: str, nome: str, email: str) -> bool:
+        """Digita o termo na lista com pesquisa e escolhe a opção do aluno."""
+        d = self.driver
+        caixa = lista.find_element(By.XPATH, "following-sibling::span[contains(@class, 'select2')][1]"
+                                             "//*[contains(@class, 'select2-selection')]")
+        self._clicar(caixa)
+        campo = self._esperar(EC.visibility_of_element_located(
+            (By.CSS_SELECTOR, ".select2-container--open .select2-search__field")),
+            o_que="o campo de digitação da busca por aluno")
+        campo.clear()
+        campo.send_keys(termo)
+
+        def carregou(drv):
+            try:
+                opcoes = drv.execute_script(
+                    "return [...document.querySelectorAll('.select2-container--open .select2-results__option')]"
+                    ".map(o => [o.className || '', (o.innerText || o.textContent || '').trim()]);")
+            except WebDriverException:
+                return False
+            if not opcoes or any("loading-results" in c or not t or any(
+                    p in t.lower() for p in ("pesquisando", "searching", "carregando", "loading", "digite", "please enter"))
+                    for c, t in opcoes):
+                return False
+            return opcoes
+
+        try:
+            opcoes = self._esperar(carregou, 20)
+        except TimeoutException:
+            opcoes = []
+        alvo = normalizar(nome)
+        indice = None
+        for i, (classes, texto) in enumerate(opcoes):
+            if "message" in classes:  # "Nenhum resultado encontrado"
+                continue
+            nome_opcao = normalizar(texto.split("(")[0])
+            if (email and email.lower() in texto.lower()) or nome_opcao == alvo:
+                indice = i
+                break
+            if indice is None and all(p in nome_opcao.split() for p in alvo.split()):
+                indice = i
+        if indice is None:
+            campo.send_keys(Keys.ESCAPE)
+            self.log(f"\"{termo}\" não apareceu na busca por aluno.")
+            return False
+        opcao = d.execute_script(
+            "return document.querySelectorAll('.select2-container--open .select2-results__option')[arguments[0]];",
+            indice)
+        try:
+            opcao.click()
+        except WebDriverException:
+            d.execute_script(
+                "arguments[0].dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));", opcao)
+        return True
+
+    def baixar_certificado(self, aluno: str, curso: str, destino: Path, email: str = "") -> None:
+        """Pesquisa o aluno, abre Ações -> "Ver Certificado" do curso e salva em PDF."""
+        d = self.driver
+        linhas = self._pesquisar_aluno(aluno, email)
+        alvo_curso = normalizar(curso)
+        indice = next((i for _, c, _, i in linhas if normalizar(c) == alvo_curso), None)
+        if indice is None:
+            pasta = self.salvar_diagnostico(f"matrícula de {aluno} em {curso}")
+            raise ErroPlataforma(f"Não achei a matrícula de {aluno} em \"{curso}\" na pesquisa. Print em {pasta}")
+        linha = d.execute_script(_JS_LINHA_MATRICULA, indice)
+        link = self._link_certificado(linha)
+        janela = d.current_window_handle
+        abas_antes = set(d.window_handles)
+        url = self._href_real(link)
+        if url:
+            pdf = self._baixar_se_for_pdf(url)
+            if pdf:
+                destino.write_bytes(pdf)
+                return
+            d.switch_to.new_window("tab")
+            d.get(url)
+        else:
+            self._clicar(link)
+            nova = self._esperar(lambda drv: next((a for a in drv.window_handles if a not in abas_antes), False), 30,
+                                 o_que="a aba do certificado")
+            d.switch_to.window(nova)
+        try:
+            self._esperar(lambda drv: drv.execute_script("return document.readyState") == "complete", 60)
+            time.sleep(2)  # imagens e assinaturas
+            pdf = d.execute_cdp_cmd("Page.printToPDF", {
+                "printBackground": True, "landscape": True, "preferCSSPageSize": True,
+                "marginTop": 0, "marginBottom": 0, "marginLeft": 0, "marginRight": 0,
+            })
+            destino.write_bytes(base64.b64decode(pdf["data"]))
+        finally:
+            if d.current_window_handle != janela:
+                d.close()
+            d.switch_to.window(janela)
+
+    def _link_certificado(self, linha):
+        """O link "Ver Certificado" da linha (abre o menu Ações se precisar)."""
+        d = self.driver
+        achar = ".//a[contains(translate(normalize-space(.), 'CERTIFIDO', 'certifido'), 'certificado')]"
+        links = linha.find_elements(By.XPATH, achar)
+        if links and self._href_real(links[0]):
+            return links[0]
+        acoes = linha.find_elements(By.CSS_SELECTOR, "td:last-child button, td:last-child a, td:last-child [role=button]")
+        if acoes:
+            self._clicar(acoes[0])
+            time.sleep(1)
+        link = d.execute_script(_JS_ACHAR_BOTAO, "ver certificado")
+        if not link:
+            pasta = self.salvar_diagnostico("Ações -> Ver Certificado")
+            raise ErroPlataforma(f"Não achei \"Ver Certificado\" no menu Ações. Print em {pasta}")
+        return link
+
+    def _href_real(self, link) -> str:
+        """O endereço do link, ou "" se ele só roda um script (href="#" ou javascript:)."""
+        bruto = (self.driver.execute_script("return arguments[0].getAttribute('href');", link) or "").strip()
+        if not bruto or bruto.startswith("#") or bruto.lower().startswith("javascript"):
+            return ""
+        return link.get_attribute("href") or ""
+
+    def _baixar_se_for_pdf(self, url: str) -> bytes | None:
+        """Se o link já entrega um PDF, baixa direto (sem imprimir)."""
+        try:
+            dados = self.driver.execute_async_script("""
+                const [url, fim] = arguments;
+                fetch(url, {credentials: 'include'}).then(async r => {
+                    if (!(r.headers.get('content-type') || '').includes('pdf')) return fim(null);
+                    const b = new Uint8Array(await r.arrayBuffer());
+                    let s = ''; for (let i = 0; i < b.length; i += 8192) s += String.fromCharCode(...b.subarray(i, i + 8192));
+                    fim(btoa(s));
+                }).catch(() => fim(null));""", url)
+        except WebDriverException:
+            return None
+        return base64.b64decode(dados) if dados else None
+
+
+# Linhas da tabela de Matrículas: [aluno, curso, progresso, nº da linha], achando as colunas
+# pelo cabeçalho. Devolve null se a tabela ainda não existe.
+_JS_LINHAS_MATRICULAS = """
+const norm = t => (t || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/\\s+/g, ' ').trim().toLowerCase();
+const tabela = [...document.querySelectorAll('table')].find(t => {
+    const cab = [...t.querySelectorAll('th')].map(th => norm(th.textContent));
+    return cab.some(c => c.includes('aluno')) && cab.some(c => c.includes('curso'));
+});
+if (!tabela) return null;
+const cab = [...tabela.querySelectorAll('th')].map(th => norm(th.textContent));
+const col = k => cab.findIndex(c => c.includes(k));
+const [a, c, p] = [col('aluno'), col('curso'), col('progresso')];
+return [...tabela.querySelectorAll('tbody tr')].map((tr, n) => {
+    const td = [...tr.children];
+    const txt = i => i >= 0 && td[i] ? td[i].innerText.replace(/\\s+/g, ' ').trim() : '';
+    return [txt(a), txt(c), txt(p), n];
+}).filter(l => l[0] && l[1]);
+"""
+
+# A linha (tr) de número arguments[0] da mesma tabela.
+_JS_LINHA_MATRICULA = """
+const norm = t => (t || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase();
+const tabela = [...document.querySelectorAll('table')].find(t => {
+    const cab = [...t.querySelectorAll('th')].map(th => norm(th.textContent));
+    return cab.some(c => c.includes('aluno')) && cab.some(c => c.includes('curso'));
+});
+return tabela.querySelectorAll('tbody tr')[arguments[0]];
+"""

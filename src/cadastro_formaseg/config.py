@@ -47,3 +47,9 @@ def carregar_cursos(arquivo: Path | None = None) -> list[Curso]:
     arquivo = arquivo or pasta_config() / "cursos.json"
     dados = json.loads(arquivo.read_text(encoding="utf-8"))
     return [Curso(nome=c["nome"], id=str(c["id"])) for c in dados["cursos"]]
+
+
+def pasta_certificados() -> Path:
+    pasta = pasta_base() / "assets" / "certificados"
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta

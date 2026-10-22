@@ -14,9 +14,10 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, credenciais, email_alunos, historico
-from .config import carregar_cursos, pasta_saida
+from .config import carregar_cursos, pasta_certificados, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
+from .monitoramento import ler_exportacao, nome_certificado, nomes_colados, procurar
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
 AVISO_JA_EXISTE = "já existe, só matrícula (confira se é a mesma pessoa)"
@@ -60,6 +61,7 @@ class App(tk.Tk):
         ttk.Button(topo, text="Abrir ficha (PDF)...", command=self.abrir_ficha).pack(side="left")
         self.lbl_arquivo = ttk.Label(topo, text="Nenhuma ficha aberta")
         self.lbl_arquivo.pack(side="left", padx=10)
+        ttk.Button(topo, text="Monitoramento", command=lambda: JanelaMonitoramento(self)).pack(side="right")
 
         corpo = ttk.PanedWindow(self, orient="horizontal")
         corpo.pack(fill="both", expand=True, padx=8)
@@ -467,7 +469,7 @@ class App(tk.Tk):
 class DialogoLogin(tk.Toplevel):
     """Pede usuário e senha do admin. Nada é gravado em arquivo."""
 
-    def __init__(self, pai):
+    def __init__(self, pai, texto_ok: str = "Entrar e enviar"):
         super().__init__(pai)
         self.title("Login da plataforma")
         self.resizable(False, False)
@@ -490,7 +492,7 @@ class DialogoLogin(tk.Toplevel):
         botoes = ttk.Frame(quadro)
         botoes.grid(row=5, column=0, pady=(10, 0), sticky="e")
         ttk.Button(botoes, text="Cancelar", command=self.destroy).pack(side="right")
-        ttk.Button(botoes, text="Entrar e enviar", command=self._ok).pack(side="right", padx=6)
+        ttk.Button(botoes, text=texto_ok, command=self._ok).pack(side="right", padx=6)
         self.bind("<Return>", lambda _: self._ok())
         entrada.focus_set()
         self.grab_set()
@@ -500,6 +502,166 @@ class DialogoLogin(tk.Toplevel):
         if self.usuario.get().strip() and self.senha.get():
             self.resultado = (self.usuario.get().strip(), self.senha.get(), self.lembrar.get())
             self.destroy()
+
+
+def abrir_pasta(pasta: Path):
+    if sys.platform == "win32":
+        os.startfile(pasta)  # noqa: S606
+    else:
+        subprocess.Popen(["xdg-open", str(pasta)])
+
+
+class JanelaMonitoramento(tk.Toplevel):
+    """Cola os nomes, busca o progresso nas Matrículas e baixa os certificados de quem concluiu."""
+
+    def __init__(self, app: App):
+        super().__init__(app)
+        self.app = app
+        self.title("Monitoramento de treinamentos")
+        self.geometry("980x600")
+        self.minsize(760, 480)
+        self.fila: queue.Queue = queue.Queue()
+        self.rodando = False
+        self.linhas: list[tuple[str, str, str, str]] = []
+
+        quadro = ttk.Frame(self, padding=8)
+        quadro.pack(fill="both", expand=True)
+        ttk.Label(quadro, text="Nomes dos colaboradores (um por linha; pode colar vários de uma vez):").pack(anchor="w")
+        self.txt_nomes = tk.Text(quadro, height=7, wrap="none")
+        self.txt_nomes.pack(fill="x", pady=(2, 6))
+
+        botoes = ttk.Frame(quadro)
+        botoes.pack(fill="x")
+        self.btn_buscar = ttk.Button(botoes, text="Buscar progresso", command=self.buscar)
+        self.btn_buscar.pack(side="left")
+        self.baixar = tk.BooleanVar(value=True)
+        ttk.Checkbutton(botoes, text="Baixar certificado de quem tem 100%", variable=self.baixar).pack(side="left", padx=8)
+        ttk.Button(botoes, text="Abrir pasta dos certificados",
+                   command=lambda: abrir_pasta(pasta_certificados())).pack(side="right")
+        ttk.Button(botoes, text="Copiar resultado", command=self.copiar).pack(side="right", padx=6)
+
+        colunas = ("aluno", "curso", "progresso", "certificado")
+        self.tabela = ttk.Treeview(quadro, columns=colunas, show="headings")
+        for col, titulo, largura in [("aluno", "Aluno", 240), ("curso", "Curso", 340),
+                                     ("progresso", "Progresso", 80), ("certificado", "Certificado", 220)]:
+            self.tabela.heading(col, text=titulo)
+            self.tabela.column(col, width=largura, anchor="w")
+        self.tabela.tag_configure("ok", foreground="#15803d")
+        self.tabela.tag_configure("falta", foreground="#b45309")
+        self.tabela.pack(fill="both", expand=True, pady=6)
+
+        self.log = tk.Text(quadro, height=6, state="disabled", wrap="word")
+        self.log.pack(fill="x")
+        self.txt_nomes.focus_set()
+        self.after(200, self._processar_fila)
+
+    def escrever(self, texto: str):
+        self.log.config(state="normal")
+        self.log.insert("end", f"{datetime.now():%H:%M:%S}  {texto}\n")
+        self.log.see("end")
+        self.log.config(state="disabled")
+
+    def buscar(self):
+        if self.rodando:
+            return
+        nomes = nomes_colados(self.txt_nomes.get("1.0", "end"))
+        if not nomes:
+            messagebox.showinfo("Monitoramento", "Cole ou digite ao menos um nome.", parent=self)
+            return
+        login = DialogoLogin(self, texto_ok="Entrar e buscar")
+        if not login.resultado:
+            return
+        usuario, senha, lembrar = login.resultado
+        if lembrar:
+            credenciais.salvar(usuario, senha)
+        self.rodando = True
+        self.btn_buscar.config(state="disabled")
+        self.tabela.delete(*self.tabela.get_children())
+        self.linhas.clear()
+        threading.Thread(target=self._buscar_em_segundo_plano,
+                         args=(nomes, usuario, senha, self.baixar.get(), self.app.mostrar_navegador.get()),
+                         daemon=True).start()
+
+    def _buscar_em_segundo_plano(self, nomes, usuario, senha, baixar, visivel):
+        from .plataforma import ErroPlataforma, Plataforma
+
+        log = lambda texto: self.fila.put(("log", texto))  # noqa: E731
+        try:
+            with Plataforma(log=log, visivel=visivel) as p:
+                p.login(usuario, senha)
+                try:
+                    arquivo = p.exportar_matriculas()
+                    resultados = procurar(nomes, ler_exportacao(arquivo))
+                except (ErroPlataforma, ValueError) as erro:
+                    log(f"AVISO: {erro}")
+                    log("Buscando aluno por aluno na tela de Matrículas...")
+                    resultados = []
+                    for nome in nomes:
+                        resultados += procurar([nome], p.matriculas_do_aluno(nome))
+                pasta = pasta_certificados()
+                for r in resultados:
+                    if not r.matriculas:
+                        self.fila.put(("linha", (r.procurado, "não encontrado nas matrículas", "-", ""), "falta"))
+                    for m in r.matriculas:
+                        situacao, tag = "", ""
+                        if m.concluida:
+                            situacao, tag = "concluído", "ok"
+                            if baixar:
+                                situacao, tag = self._certificado(p, m, pasta / nome_certificado(m.aluno, m.curso), log)
+                        progresso = f"{m.progresso:g}%" if m.progresso is not None else (m.texto_progresso or "?")
+                        self.fila.put(("linha", (m.aluno, m.curso, progresso, situacao), tag))
+                achados = sum(1 for r in resultados if r.matriculas)
+                self.fila.put(("fim", f"Pronto: {achados} de {len(nomes)} colaborador(es) encontrados."))
+        except ErroPlataforma as erro:
+            self.fila.put(("erro", str(erro)))
+        except Exception as erro:  # qualquer falha inesperada do navegador
+            detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
+            self.fila.put(("erro", f"{type(erro).__name__}: {detalhe[0] if detalhe else 'sem detalhes'}"))
+        finally:
+            self.fila.put(("liberar", None))
+
+    @staticmethod
+    def _certificado(p, m, destino: Path, log) -> tuple[str, str]:
+        if destino.exists():
+            return "já baixado", "ok"
+        log(f"Baixando o certificado de {m.aluno} ({m.curso})...")
+        try:
+            p.baixar_certificado(m.aluno, m.curso, destino, m.email)
+        except Exception as erro:  # um certificado com problema não para os outros
+            detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
+            log(f"ERRO no certificado de {m.aluno}: {detalhe[0] if detalhe else type(erro).__name__}")
+            return "erro ao baixar (veja o registro)", "falta"
+        return f"salvo: {destino.name}", "ok"
+
+    def copiar(self):
+        texto = "\n".join("\t".join(l) for l in [("Aluno", "Curso", "Progresso", "Certificado")] + self.linhas)
+        self.clipboard_clear()
+        self.clipboard_append(texto)
+        self.escrever("Resultado copiado (cole no Excel ou no e-mail).")
+
+    def _processar_fila(self):
+        if not self.winfo_exists():
+            return
+        try:
+            while True:
+                tipo, *dado = self.fila.get_nowait()
+                if tipo == "log":
+                    self.escrever(dado[0])
+                elif tipo == "linha":
+                    valores, tag = dado
+                    self.linhas.append(valores)
+                    self.tabela.insert("", "end", values=valores, tags=(tag,) if tag else ())
+                elif tipo == "erro":
+                    self.escrever(f"ERRO: {dado[0]}")
+                    messagebox.showerror("Erro no monitoramento", dado[0], parent=self)
+                elif tipo == "fim":
+                    self.escrever(dado[0])
+                elif tipo == "liberar":
+                    self.rodando = False
+                    self.btn_buscar.config(state="normal")
+        except queue.Empty:
+            pass
+        self.after(200, self._processar_fila)
 
 
 def main():
