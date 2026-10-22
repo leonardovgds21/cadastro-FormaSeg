@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -49,7 +50,27 @@ def carregar_cursos(arquivo: Path | None = None) -> list[Curso]:
     return [Curso(nome=c["nome"], id=str(c["id"])) for c in dados["cursos"]]
 
 
+def area_de_trabalho() -> Path:
+    """A Área de Trabalho de verdade do Windows (pode estar dentro do OneDrive)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        caminho = ctypes.create_unicode_buffer(260)
+        # CSIDL_DESKTOPDIRECTORY = 0x10: segue o redirecionamento do OneDrive
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, caminho) == 0 and caminho.value:
+            return Path(caminho.value)
+    return Path.home() / "Desktop"
+
+
 def pasta_certificados() -> Path:
-    pasta = pasta_base() / "assets" / "certificados"
+    pasta = area_de_trabalho() / "certificados"
+    pasta.mkdir(parents=True, exist_ok=True)
+    return pasta
+
+
+def pasta_downloads() -> Path:
+    """Pasta temporária dos downloads do navegador, fora do OneDrive (que mexe
+    nos arquivos enquanto eles são gravados)."""
+    pasta = Path(tempfile.gettempdir()) / "CadastroFormaSeg" / "downloads"
     pasta.mkdir(parents=True, exist_ok=True)
     return pasta

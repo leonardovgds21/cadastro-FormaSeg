@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import threading
@@ -14,7 +15,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, credenciais, email_alunos, historico
-from .config import carregar_cursos, pasta_certificados, pasta_saida
+from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
 from .monitoramento import ler_exportacao, nome_certificado, nomes_colados, procurar
@@ -504,6 +505,18 @@ class DialogoLogin(tk.Toplevel):
             self.destroy()
 
 
+def guardar_para_diagnostico(arquivo: Path) -> Path | None:
+    """Copia a lista exportada para dados/erros, para entender o formato."""
+    try:
+        pasta = pasta_dados() / "erros"
+        pasta.mkdir(parents=True, exist_ok=True)
+        destino = pasta / f"{datetime.now():%Y-%m-%d_%H%M%S}_exportacao{arquivo.suffix}"
+        shutil.copyfile(arquivo, destino)
+        return destino
+    except OSError:
+        return None
+
+
 def abrir_pasta(pasta: Path):
     if sys.platform == "win32":
         os.startfile(pasta)  # noqa: S606
@@ -591,8 +604,13 @@ class JanelaMonitoramento(tk.Toplevel):
                 p.login(usuario, senha)
                 try:
                     arquivo = p.exportar_matriculas()
-                    resultados = procurar(nomes, ler_exportacao(arquivo))
-                except (ErroPlataforma, ValueError) as erro:
+                    try:
+                        resultados = procurar(nomes, ler_exportacao(arquivo))
+                    except (OSError, ValueError):
+                        copia = guardar_para_diagnostico(arquivo)
+                        raise ErroPlataforma(
+                            f"Não consegui ler a lista exportada ({arquivo.name}). Cópia em: {copia}") from None
+                except ErroPlataforma as erro:
                     log(f"AVISO: {erro}")
                     log("Buscando aluno por aluno na tela de Matrículas...")
                     resultados = []
