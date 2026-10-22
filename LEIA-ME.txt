@@ -37,6 +37,10 @@ Como usar
      "certificados" na Área de Trabalho (criada se não existir), com o
      nome "Nome - Curso.pdf". Certificado que já está na pasta não é
      baixado de novo.
+   - Quem não estiver na lista exportada é procurado um a um na tela de
+     Matrículas (pelo nome, pelo e-mail nome.sobrenome e pelo sobrenome).
+     Com muitos nomes isso leva alguns minutos; acompanhe pelo registro.
+   - O curso aparece com o nome completo, como está na plataforma.
    - "Copiar resultado" copia a tabela para colar no Excel ou num e-mail.
    - Nada é alterado na plataforma: o monitoramento só lê.
 
