@@ -636,6 +636,8 @@ class JanelaMonitoramento(tk.Toplevel):
                     if not r.matriculas:
                         self.fila.put(("linha", (r.procurado, "não encontrado nas matrículas", "-", ""), "falta"))
                     for m in r.matriculas:
+                        if len(m.aluno.split()) < len(r.procurado.split()):
+                            m.aluno = r.procurado  # a lista trouxe só o primeiro nome
                         situacao, tag = "", ""
                         if m.concluida:
                             situacao, tag = "concluído", "ok"

@@ -562,7 +562,10 @@ class Plataforma:
             _, linhas = self._esperar(leu, 30)
         except TimeoutException:
             linhas = d.execute_script(_JS_LINHAS_MATRICULAS) or []
-        return [l for l in linhas if mesmo_nome(nome, l[0])]
+            return [l for l in linhas if mesmo_nome(nome, l[0])]
+        # A tabela já foi filtrada pelo aluno escolhido na busca: se o nome da
+        # tela for diferente do procurado (ex.: só o primeiro nome), vale a tabela.
+        return [l for l in linhas if mesmo_nome(nome, l[0])] or linhas
 
     def _filtro_aluno(self):
         """A lista com pesquisa (select2) de aluno/usuário do filtro de Matrículas."""
