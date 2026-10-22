@@ -6,6 +6,7 @@ import os
 import queue
 import subprocess
 import sys
+import copy
 import threading
 import time
 import tkinter as tk
@@ -13,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, credenciais, historico
+from . import __version__, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, email_base, email_disponivel, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
@@ -46,6 +47,7 @@ class App(tk.Tk):
             var.trace_add("write", lambda *_, c=campo: self._campo_editado(c))
         self._carregando = False
         self.ultima_saida: Path | None = None
+        self.cadastrados: list[Aluno] = []  # alunos do último lote gerado/enviado
         self.fila: queue.Queue = queue.Queue()
         self.enviando = False
 
@@ -113,6 +115,8 @@ class App(tk.Tk):
         ttk.Button(rodape, text="Gerar CSVs", command=self.gerar_csvs).pack(side="left")
         self.btn_abrir_saida = ttk.Button(rodape, text="Abrir pasta dos CSVs", command=self.abrir_saida, state="disabled")
         self.btn_abrir_saida.pack(side="left", padx=6)
+        self.btn_email = ttk.Button(rodape, text="Enviar e-mail aos alunos", command=self.enviar_email, state="disabled")
+        self.btn_email.pack(side="left")
         self._montar_botoes_extras(rodape)
 
         self.log = tk.Text(self, height=7, state="disabled", wrap="word")
@@ -203,7 +207,9 @@ class App(tk.Tk):
         cursos = gerar_csv_cursos(self.alunos, pasta / "import-curso.csv")
         historico.registrar(self.alunos)
         self.ultima_saida = pasta
+        self.cadastrados = copy.deepcopy(self.alunos)
         self.btn_abrir_saida.config(state="normal")
+        self.btn_email.config(state="normal")
         self.escrever(f"CSVs gerados em {pasta}")
         if not cursos:
             self.escrever("Nenhum treinamento escolhido: só o cadastro (import.csv) foi gerado.")
@@ -216,6 +222,47 @@ class App(tk.Tk):
             os.startfile(self.ultima_saida)  # noqa: S606
         else:
             subprocess.Popen(["xdg-open", str(self.ultima_saida)])
+
+    # ---------- e-mail aos alunos ----------
+    def enviar_email(self):
+        """Abre um e-mail novo no Outlook (app de e-mail padrão) para os alunos do último lote."""
+        if not self.cadastrados:
+            return
+        destinatarios, assunto, corpo = email_alunos.montar_email(self.cadastrados, self.nome_por_id)
+        link, com_dest, com_corpo = email_alunos.preparar_link(destinatarios, assunto, corpo)
+        emails = "; ".join(destinatarios)
+        try:
+            if sys.platform == "win32":
+                os.startfile(link)  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", link])
+        except OSError as erro:
+            self._copiar(emails)
+            messagebox.showerror(
+                "E-mail aos alunos",
+                f"Não consegui abrir o app de e-mail ({erro}).\n\n"
+                "Os e-mails dos alunos foram copiados: cole no campo Para de um e-mail novo.\n\n"
+                "Dica: no Windows, em Configurações > Aplicativos > Aplicativos padrão, "
+                "escolha o Outlook (novo) para o tipo de link MAILTO.")
+            return
+        self.escrever(f"E-mail aberto para {len(destinatarios)} aluno(s): {emails}")
+        if not com_dest:
+            self._copiar(emails)
+            messagebox.showinfo("E-mail aos alunos",
+                                "São muitos destinatários para caber no link. Os e-mails foram copiados:\n"
+                                "cole no campo Para (ou Cco) do e-mail que abriu.\n\n"
+                                "Clique OK depois de colar para copiar o texto da mensagem.")
+        if not com_corpo:
+            self._copiar(corpo)
+            messagebox.showinfo("E-mail aos alunos",
+                                "O texto da mensagem foi copiado: cole no corpo do e-mail (Ctrl+V).")
+        else:
+            self._copiar(emails)
+
+    def _copiar(self, texto: str):
+        self.clipboard_clear()
+        self.clipboard_append(texto)
+        self.update()
 
     # ---------- envio para a plataforma ----------
     def enviar(self):
