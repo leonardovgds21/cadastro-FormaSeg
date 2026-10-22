@@ -225,39 +225,58 @@ class App(tk.Tk):
 
     # ---------- e-mail aos alunos ----------
     def enviar_email(self):
-        """Abre um e-mail novo no Outlook (app de e-mail padrão) para os alunos da lista."""
+        """Abre e-mails novos no Outlook (app de e-mail padrão): um por conjunto de treinamentos."""
         if not self.alunos:
             return
-        destinatarios, assunto, corpo = email_alunos.montar_email(self.alunos, self.nome_por_id)
-        link, com_dest, com_corpo = email_alunos.preparar_link(destinatarios, assunto, corpo)
-        emails = "; ".join(destinatarios)
+        emails, sem_curso = email_alunos.montar_emails(
+            self.alunos, self.nome_por_id, datetime.now().strftime("%d/%m/%Y"))
+        if sem_curso:
+            nomes = ", ".join(f"{a.nome} {a.sobrenome}" for a in sem_curso)
+            self.escrever(f"Sem treinamento, ficaram fora do e-mail: {nomes}")
+        if not emails:
+            messagebox.showinfo("E-mail aos alunos", "Escolha o treinamento dos alunos antes de enviar o e-mail.")
+            return
+        for n, email in enumerate(emails, 1):
+            if n > 1 and not messagebox.askokcancel(
+                    "E-mail aos alunos",
+                    f"Agora o e-mail {n} de {len(emails)} (alunos de outro treinamento):\n\n"
+                    + "\n".join(email.cursos)):
+                return
+            if not self._abrir_email(email):
+                return
+
+    def _abrir_email(self, email: email_alunos.Email) -> bool:
+        link, com_dest, com_corpo = email_alunos.preparar_link(email.destinatarios, email.assunto, email.corpo)
+        destinatarios = "; ".join(email.destinatarios)
         try:
             if sys.platform == "win32":
                 os.startfile(link)  # noqa: S606
             else:
                 subprocess.Popen(["xdg-open", link])
         except OSError as erro:
-            self._copiar(emails)
+            self._copiar(destinatarios)
             messagebox.showerror(
                 "E-mail aos alunos",
                 f"Não consegui abrir o app de e-mail ({erro}).\n\n"
                 "Os e-mails dos alunos foram copiados: cole no campo Para de um e-mail novo.\n\n"
                 "Dica: no Windows, em Configurações > Aplicativos > Aplicativos padrão, "
                 "escolha o Outlook (novo) para o tipo de link MAILTO.")
-            return
-        self.escrever(f"E-mail aberto para {len(destinatarios)} aluno(s): {emails}")
+            return False
+        self.escrever(f"E-mail aberto ({', '.join(email.cursos)}) para: {destinatarios}")
         if not com_dest:
-            self._copiar(emails)
+            self._copiar(destinatarios)
             messagebox.showinfo("E-mail aos alunos",
                                 "São muitos destinatários para caber no link. Os e-mails foram copiados:\n"
                                 "cole no campo Para (ou Cco) do e-mail que abriu.\n\n"
                                 "Clique OK depois de colar para copiar o texto da mensagem.")
         if not com_corpo:
-            self._copiar(corpo)
+            self._copiar(email.corpo)
             messagebox.showinfo("E-mail aos alunos",
-                                "O texto da mensagem foi copiado: cole no corpo do e-mail (Ctrl+V).")
+                                "O texto da mensagem é grande demais para o link e foi copiado:\n"
+                                "cole no corpo do e-mail (Ctrl+V).")
         else:
-            self._copiar(emails)
+            self._copiar(destinatarios)
+        return True
 
     def _copiar(self, texto: str):
         self.clipboard_clear()

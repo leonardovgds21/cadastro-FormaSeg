@@ -8,6 +8,7 @@ para a área de transferência e o link leva só destinatários e assunto.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from urllib.parse import quote
 
 from .config import URL_PAINEL
@@ -15,57 +16,76 @@ from .gerador import Aluno
 
 # O Windows aceita ~2048 caracteres num link; fica uma folga.
 LIMITE_MAILTO = 1900
+# Podem ir sem codificar no assunto/corpo de um mailto (RFC 6068), o que encurta o link.
+SEGUROS = "!'()*,:@/"
 
 
-def nomes_cursos(aluno: Aluno, nome_por_id: dict[str, str]) -> list[str]:
-    return [nome_por_id.get(c, f"curso {c}") for c in aluno.cursos]
+ASSUNTO = "Treinamentos para atualização do certificado"
+
+MODELO = """Olá!
+
+Segue treinamentos para atualização do certificado!
+
+A empresa GAP GESTÃO AMBIENTAL E PROJETOS LTDA. lhe inscreveu no curso de:
+
+{cursos}
+
+Ficamos felizes que você esteja se aperfeiçoando.
+
+Os cursos possuem conteúdos completos e vídeos para melhor fixação dos temas, conforme exigências do \
+Ministério do Trabalho e Emprego e Secretaria de Estado da Educação e do Desporto.
+
+O prazo padrão de término do curso é de 30 dias após a data de início, sendo que a empresa poderá \
+estabelecer prazos menores caso necessário.
+
+Data de Início: {data}
+
+• Login: seu e-mail GAP
+• Senha: seu CPF
+• Acesse: {url}
+
+Lembramos que a empresa irá acompanhar todo o seu desenvolvimento no curso, como acessos, conteúdos \
+estudados, notas e certificação.
+
+Bons estudos!
+
+Qualquer dúvida entre em contato conosco."""
 
 
-def montar_email(alunos: list[Aluno], nome_por_id: dict[str, str]) -> tuple[list[str], str, str]:
-    """Devolve (destinatários, assunto, corpo)."""
-    destinatarios = [a.email for a in alunos if a.email]
-    cursos_por_aluno = [nomes_cursos(a, nome_por_id) for a in alunos]
-    iguais = all(c == cursos_por_aluno[0] for c in cursos_por_aluno) if alunos else True
-    cursos = cursos_por_aluno[0] if alunos and iguais else []
+@dataclass
+class Email:
+    destinatarios: list[str]
+    assunto: str
+    corpo: str
+    cursos: list[str]
 
-    linhas = ["Olá,", ""]
-    if iguais and not cursos:
-        assunto = "Cadastro na plataforma FormaSeg"
-        linhas.append("Informamos que você foi cadastrado(a) na plataforma de treinamentos FormaSeg.")
-    elif iguais:
-        assunto = f"Cadastro no treinamento: {' / '.join(cursos)}"
-        if len(cursos) == 1:
-            linhas.append("Informamos que você foi cadastrado(a) na plataforma FormaSeg e matriculado(a) "
-                          f"no treinamento {cursos[0]}.")
-        else:
-            linhas.append("Informamos que você foi cadastrado(a) na plataforma FormaSeg e matriculado(a) "
-                          "nos treinamentos:")
-            linhas += [f"- {c}" for c in cursos]
-    else:
-        assunto = "Cadastro nos treinamentos FormaSeg"
-        linhas.append("Informamos que vocês foram cadastrados na plataforma FormaSeg, nos treinamentos abaixo:")
-        linhas.append("")
-        for aluno, seus in zip(alunos, cursos_por_aluno):
-            nome = f"{aluno.nome} {aluno.sobrenome}".strip()
-            linhas.append(f"- {nome}: {', '.join(seus) if seus else 'somente cadastro'}")
 
-    linhas += [
-        "",
-        f"Acesso: {URL_PAINEL}",
-        "Usuário: o seu e-mail (o mesmo para o qual esta mensagem foi enviada)",
-        "Senha: o seu CPF, somente números",
-        "",
-        "Qualquer dúvida, estamos à disposição.",
-    ]
-    return destinatarios, assunto, "\n".join(linhas)
+def montar_emails(alunos: list[Aluno], nome_por_id: dict[str, str], data: str) -> tuple[list[Email], list[Aluno]]:
+    """Um e-mail para cada conjunto de treinamentos (o texto diz "lhe inscreveu no curso de").
+
+    Devolve (e-mails, alunos sem treinamento), que ficam de fora.
+    """
+    grupos: dict[tuple[str, ...], list[str]] = {}
+    sem_curso = []
+    for aluno in alunos:
+        if not aluno.cursos:
+            sem_curso.append(aluno)
+        elif aluno.email:
+            grupos.setdefault(tuple(aluno.cursos), []).append(aluno.email)
+    emails = []
+    for ids, destinatarios in grupos.items():
+        cursos = [nome_por_id.get(c, f"curso {c}") for c in ids]
+        corpo = MODELO.format(cursos="\n".join(f"• {c}" for c in cursos), data=data, url=URL_PAINEL)
+        emails.append(Email(destinatarios, ASSUNTO, corpo, cursos))
+    return emails, sem_curso
 
 
 def link_mailto(destinatarios: list[str], assunto: str, corpo: str = "") -> str:
     """Link mailto: com destinatários separados por vírgula (RFC 6068)."""
     para = ",".join(quote(e, safe="@") for e in destinatarios)
-    partes = [f"subject={quote(assunto, safe='')}"]
+    partes = [f"subject={quote(assunto, safe=SEGUROS)}"]
     if corpo:
-        partes.append(f"body={quote(corpo.replace(chr(10), chr(13) + chr(10)), safe='')}")
+        partes.append(f"body={quote(corpo.replace(chr(10), chr(13) + chr(10)), safe=SEGUROS)}")
     return f"mailto:{para}?{'&'.join(partes)}"
 
 
