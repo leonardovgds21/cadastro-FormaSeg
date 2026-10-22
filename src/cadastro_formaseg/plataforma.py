@@ -32,7 +32,7 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-from .config import URL_PAINEL, pasta_dados
+from .config import URL_PAINEL, pasta_dados, pasta_downloads
 from .gerador import sem_acento
 from .monitoramento import Matricula, ler_progresso, normalizar
 
@@ -70,7 +70,7 @@ class Plataforma:
         self.espera = espera
         self.driver: webdriver.Remote | None = None
         self.url_usuarios: str | None = None
-        self.pasta_downloads = pasta_dados() / "downloads"
+        self.pasta_downloads = pasta_downloads()
 
     # ---------- navegador ----------
     def __enter__(self):
@@ -454,13 +454,27 @@ class Plataforma:
                 continue
 
     def _esperar_download(self, antes: set[Path], tempo: int) -> Path | None:
+        """Espera um arquivo novo terminar de baixar (tamanho parado) e devolve o caminho.
+
+        O navegador grava com outro nome e renomeia no fim, e antivírus ou
+        OneDrive podem mexer no arquivo: por isso nada aqui conta que um
+        arquivo visto continua existindo."""
         fim = time.time() + tempo
+        anterior: dict[Path, int] = {}
         while time.time() < fim:
-            novos = [a for a in self.pasta_downloads.iterdir()
-                     if a not in antes and a.is_file() and a.suffix.lower() not in (".crdownload", ".tmp", ".partial")]
-            if novos and not any(a.suffix.lower() == ".crdownload" for a in self.pasta_downloads.iterdir()):
-                time.sleep(1)  # termina de gravar
-                return max(novos, key=lambda a: a.stat().st_mtime)
+            atual = {}
+            try:
+                for a in self.pasta_downloads.iterdir():
+                    if a not in antes and a.suffix.lower() not in (".crdownload", ".tmp", ".partial"):
+                        atual[a] = a.stat().st_size
+                baixando = any(a.suffix.lower() == ".crdownload" for a in self.pasta_downloads.iterdir())
+            except OSError:  # arquivo sumiu ou foi renomeado no meio da leitura
+                time.sleep(1)
+                continue
+            prontos = [a for a, tamanho in atual.items() if tamanho > 0 and anterior.get(a) == tamanho]
+            if prontos and not baixando:
+                return prontos[-1]
+            anterior = atual
             time.sleep(1)
         return None
 
