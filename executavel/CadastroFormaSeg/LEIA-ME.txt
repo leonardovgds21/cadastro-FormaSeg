@@ -41,7 +41,12 @@ Como usar
 
 Regras
 - E-mail e usuário: primeironome.ultimonome@gapgestao.com.br (sem acento;
-  ignora Filho, Júnior, Neto...). Se já existir, vira nome.sobrenome2, 3...
+  ignora Filho, Júnior, Neto...). Dois colaboradores da mesma ficha com o
+  mesmo nome: o segundo vira nome.sobrenome2, 3...
+- Se o e-mail já existir na plataforma, o aluno NÃO é cadastrado de novo:
+  só é matriculado no treinamento escolhido, com o usuário que já existe.
+  A coluna Avisos mostra "já existe, só matrícula": confira se é mesmo a
+  mesma pessoa (pode ser um homônimo).
 - Senha: CPF só com números.
 
 Arquivos desta pasta

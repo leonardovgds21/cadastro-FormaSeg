@@ -16,10 +16,11 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_certificados, pasta_saida
 from .ficha import ler_fichas
-from .gerador import Aluno, email_base, email_disponivel, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
+from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
 from .monitoramento import ler_exportacao, nome_certificado, nomes_colados, procurar
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
+AVISO_JA_EXISTE = "já existe, só matrícula (confira se é a mesma pessoa)"
 
 CAMPOS = [
     ("nome", "Nome"), ("sobrenome", "Sobrenome"), ("cpf", "CPF"),
@@ -207,14 +208,19 @@ class App(tk.Tk):
 
         pasta = pasta_saida() / datetime.now().strftime("%Y-%m-%d_%H%M%S")
         pasta.mkdir(parents=True)
-        gerar_csv_alunos(self.alunos, pasta / "import.csv")
+        novos = gerar_csv_alunos(self.alunos, pasta / "import.csv")
         cursos = gerar_csv_cursos(self.alunos, pasta / "import-curso.csv")
         historico.registrar(self.alunos)
         self.ultima_saida = pasta
         self.btn_abrir_saida.config(state="normal")
         self.escrever(f"CSVs gerados em {pasta}")
+        if not novos:
+            self.escrever("Todos já existem na plataforma: só a matrícula (import-curso.csv) foi gerada.")
         if not cursos:
             self.escrever("Nenhum treinamento escolhido: só o cadastro (import.csv) foi gerado.")
+        sem_nada = [f"{a.nome} {a.sobrenome}" for a in self.alunos if a.ja_existe and not a.cursos]
+        if sem_nada:
+            self.escrever("Já existem e estão sem treinamento (nada a fazer): " + ", ".join(sem_nada))
         return pasta
 
     def abrir_saida(self):
@@ -329,17 +335,19 @@ class App(tk.Tk):
                         log("Envio cancelado.")
                         return
                     existentes = set()
-                if existentes:
-                    self.fila.put(("conflito", existentes))
-                    return
+                self.fila.put(("ja_existem", existentes))
                 self.fila.put(("gerar", None))
                 pasta = self._aguardar_csvs()
                 if not pasta:
                     return
-                p.importar_usuarios(pasta / "import.csv", confirmar=not teste)
+                usuarios = pasta / "import.csv"
+                if usuarios.exists():
+                    p.importar_usuarios(usuarios, confirmar=not teste)
+                else:
+                    log("Nenhum usuário novo para cadastrar.")
                 cursos = pasta / "import-curso.csv"
                 if cursos.exists():
-                    if not teste:
+                    if not teste and usuarios.exists():
                         time.sleep(3)  # dá tempo da plataforma criar os usuários
                     p.importar_matriculas(cursos, confirmar=not teste)
                 self.fila.put(("fim", "Modo teste concluído." if teste else "Envio concluído. Confira no painel."))
@@ -374,8 +382,8 @@ class App(tk.Tk):
                 elif tipo == "perguntar":
                     texto, resposta = dado
                     resposta.put(messagebox.askyesno("Conferência de e-mails", texto))
-                elif tipo == "conflito":
-                    self._resolver_conflitos(dado)
+                elif tipo == "ja_existem":
+                    self._marcar_existentes(dado)
                 elif tipo == "erro":
                     self.escrever(f"ERRO: {dado}")
                     messagebox.showerror("Erro no envio", dado)
@@ -389,22 +397,16 @@ class App(tk.Tk):
             pass
         self.after(200, self._processar_fila)
 
-    def _resolver_conflitos(self, existentes: set[str]):
-        """Troca os e-mails que já existem por maria.souza2, 3... e pede para conferir."""
-        usados = set(existentes) | {a.email for a in self.alunos}
-        trocas = []
+    def _marcar_existentes(self, existentes: set[str]):
+        """Quem já tem o e-mail na plataforma não é cadastrado de novo: só matriculado."""
+        existentes = {e.lower() for e in existentes}
         for aluno in self.alunos:
-            if aluno.email in existentes:
-                novo = email_disponivel(email_base(f"{aluno.nome} {aluno.sobrenome}"), usados)
-                trocas.append(f"{aluno.email} -> {novo}")
-                aluno.email = novo
-                usados.add(novo)
-                self._atualizar_linha(aluno)
-        self._selecionar()
-        texto = "Estes e-mails já existiam na plataforma e foram trocados:\n\n" + "\n".join(trocas)
-        texto += "\n\nConfira e clique em Enviar de novo."
-        self.escrever(texto.replace("\n\n", " ").replace("\n", "; "))
-        messagebox.showwarning("E-mails já existentes", texto)
+            aluno.ja_existe = aluno.email.lower() in existentes
+            self._atualizar_linha(aluno)
+        nomes = [f"{a.nome} {a.sobrenome} ({a.email})" for a in self.alunos if a.ja_existe]
+        if nomes:
+            self.escrever(f"{len(nomes)} já existe(m) na plataforma, só matrícula (confira se é a mesma pessoa): "
+                          + "; ".join(nomes))
 
     def esquecer_login(self):
         credenciais.apagar()
@@ -421,7 +423,7 @@ class App(tk.Tk):
 
     def _atualizar_linha(self, aluno: Aluno):
         iid = str(self.alunos.index(aluno))
-        avisos = "; ".join(aluno.avisos + validar(aluno))
+        avisos = "; ".join(([AVISO_JA_EXISTE] if aluno.ja_existe else []) + aluno.avisos + validar(aluno))
         self.tabela.item(
             iid,
             values=(f"{aluno.nome} {aluno.sobrenome}", aluno.email, len(aluno.cursos) or "-", avisos),
@@ -443,6 +445,8 @@ class App(tk.Tk):
         if self._carregando or not self.atual:
             return
         setattr(self.atual, campo, self.vars[campo].get().strip())
+        if campo == "email":
+            self.atual.ja_existe = False  # e-mail novo: a próxima conferência decide
         self._atualizar_linha(self.atual)
 
     def _mostrar_cursos(self):

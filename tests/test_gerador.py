@@ -70,3 +70,18 @@ def test_csvs(tmp_path):
         "maria.souza@gapgestao.com.br;82557",
         "maria.souza@gapgestao.com.br;84075",
     ]
+
+
+def test_ja_existente_so_matricula(tmp_path):
+    novo = Colaborador(nome_completo="MARIA DE SOUZA", cpf=CPF_FICTICIO)
+    antigo = Colaborador(nome_completo="JOAO LIMA", cpf=CPF_FICTICIO)
+    a, b = montar_alunos([novo, antigo], set())
+    b.ja_existe = True
+    a.cursos = b.cursos = ["82557"]
+    linhas = gerar_csv_alunos([a, b], tmp_path / "import.csv").read_text("utf-8").splitlines()
+    assert len(linhas) == 2 and "maria.souza@" in linhas[1]
+    cursos = gerar_csv_cursos([a, b], tmp_path / "import-curso.csv").read_text("utf-8").splitlines()
+    assert cursos[1:] == ["maria.souza@gapgestao.com.br;82557", "joao.lima@gapgestao.com.br;82557"]
+
+    a.ja_existe = True
+    assert gerar_csv_alunos([a, b], tmp_path / "import2.csv") is None
