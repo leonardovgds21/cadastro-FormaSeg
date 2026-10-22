@@ -6,7 +6,6 @@ import os
 import queue
 import subprocess
 import sys
-import copy
 import threading
 import time
 import tkinter as tk
@@ -47,7 +46,6 @@ class App(tk.Tk):
             var.trace_add("write", lambda *_, c=campo: self._campo_editado(c))
         self._carregando = False
         self.ultima_saida: Path | None = None
-        self.cadastrados: list[Aluno] = []  # alunos do último lote gerado/enviado
         self.fila: queue.Queue = queue.Queue()
         self.enviando = False
 
@@ -148,8 +146,12 @@ class App(tk.Tk):
             return
         existentes = self._emails_existentes()
         self.alunos = montar_alunos(colaboradores, existentes)
+        ja_cadastrados = historico.reaproveitar_emails(self.alunos, historico.ultimo_cadastro_por_nome())
         self.lbl_arquivo.config(text=f"{Path(caminho).name}  ({len(self.alunos)} colaborador(es))")
         self.escrever(f"Ficha lida: {len(self.alunos)} colaborador(es).")
+        if ja_cadastrados:
+            self.escrever(f"{ja_cadastrados} já cadastrado(s) neste computador: mantive o e-mail usado antes.")
+        self.btn_email.config(state="normal")
         self._recarregar_tabela(selecionar=0)
 
     def _emails_existentes(self) -> set[str]:
@@ -207,9 +209,7 @@ class App(tk.Tk):
         cursos = gerar_csv_cursos(self.alunos, pasta / "import-curso.csv")
         historico.registrar(self.alunos)
         self.ultima_saida = pasta
-        self.cadastrados = copy.deepcopy(self.alunos)
         self.btn_abrir_saida.config(state="normal")
-        self.btn_email.config(state="normal")
         self.escrever(f"CSVs gerados em {pasta}")
         if not cursos:
             self.escrever("Nenhum treinamento escolhido: só o cadastro (import.csv) foi gerado.")
@@ -225,10 +225,10 @@ class App(tk.Tk):
 
     # ---------- e-mail aos alunos ----------
     def enviar_email(self):
-        """Abre um e-mail novo no Outlook (app de e-mail padrão) para os alunos do último lote."""
-        if not self.cadastrados:
+        """Abre um e-mail novo no Outlook (app de e-mail padrão) para os alunos da lista."""
+        if not self.alunos:
             return
-        destinatarios, assunto, corpo = email_alunos.montar_email(self.cadastrados, self.nome_por_id)
+        destinatarios, assunto, corpo = email_alunos.montar_email(self.alunos, self.nome_por_id)
         link, com_dest, com_corpo = email_alunos.preparar_link(destinatarios, assunto, corpo)
         emails = "; ".join(destinatarios)
         try:
