@@ -43,6 +43,7 @@ class Aluno:
     senha: str = ""
     cursos: list[str] = field(default_factory=list)  # ids do Curso/Combo
     avisos: list[str] = field(default_factory=list)
+    ja_existe: bool = False  # e-mail já existe na plataforma: só matrícula
 
 
 def sem_acento(texto: str) -> str:
@@ -182,15 +183,18 @@ def _escrever(caminho: Path, colunas: list[str], linhas: list[list[str]]) -> Non
         escritor.writerows(linhas)
 
 
-def gerar_csv_alunos(alunos: list[Aluno], caminho: Path) -> Path:
+def gerar_csv_alunos(alunos: list[Aluno], caminho: Path) -> Path | None:
+    """Só quem ainda não existe na plataforma. Devolve None se não houver ninguém."""
     linhas = [
         [
             a.nome, a.sobrenome, a.cpf, a.cep, a.endereco, a.numero, a.complemento,
             a.bairro, a.cidade, a.estado, a.telefone, a.celular, a.email, a.email,
             a.senha, "", "", "",
         ]
-        for a in alunos
+        for a in alunos if not a.ja_existe
     ]
+    if not linhas:
+        return None
     _escrever(caminho, COLUNAS_ALUNOS, linhas)
     return caminho
 
