@@ -14,6 +14,13 @@ Como usar
    - "Modo teste" faz tudo, mas cancela na confirmação (não importa nada).
    - "Mostrar navegador" deixa ver o que está acontecendo.
    - "Gerar CSVs" só cria os arquivos, para importar à mão.
+6. Depois do envio, clique em "Enviar e-mail aos alunos". Abre um e-mail
+   novo no Outlook com os alunos no campo Para, assunto e texto com o nome
+   do treinamento. Confira e clique em Enviar no Outlook.
+   - Se abrir outro programa, em Configurações > Aplicativos > Aplicativos
+     padrão, escolha o Outlook (novo) para o tipo de link MAILTO.
+   - Os e-mails dos alunos também ficam copiados (Ctrl+V), por exemplo
+     para colar no campo Cco.
 
 Regras
 - E-mail e usuário: primeironome.ultimonome@gapgestao.com.br (sem acento;
