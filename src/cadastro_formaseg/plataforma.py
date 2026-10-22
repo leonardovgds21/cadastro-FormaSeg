@@ -33,8 +33,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from .config import URL_PAINEL, pasta_dados, pasta_downloads
-from .gerador import sem_acento
-from .monitoramento import Matricula, ler_progresso, normalizar
+from .gerador import email_base, sem_acento
+from .monitoramento import Matricula, ler_progresso, mesmo_nome, nome_certificado, normalizar
 
 URL_BASE = URL_PAINEL.split("/painel")[0]
 URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
@@ -59,6 +59,24 @@ return el.closest('a, button, label, [role=button], [onclick]') || el;
 """
 
 
+def escolher_exportacao(opcoes: list, textos: list[str]):
+    """Prefere a lista completa ("todas") e, depois, CSV > Excel; nunca PDF se houver outra."""
+    def nota(texto: str) -> int:
+        t = sem_acento(texto).lower()
+        if not t or "pdf" in t:
+            return -1
+        pontos = 10 if any(p in t for p in ("todas", "todos", "tudo", "complet")) else 0
+        for peso, chave in ((5, "csv"), (4, "excel"), (4, "xls"), (3, "planilha")):
+            if chave in t:
+                pontos += peso
+                break
+        return pontos
+
+    candidatos = [(nota(t), -i, e) for i, (e, t) in enumerate(zip(opcoes, textos))]
+    candidatos = [c for c in candidatos if c[0] >= 0]
+    return max(candidatos, key=lambda c: c[:2])[2] if candidatos else None
+
+
 class ErroPlataforma(Exception):
     pass
 
@@ -71,6 +89,7 @@ class Plataforma:
         self.driver: webdriver.Remote | None = None
         self.url_usuarios: str | None = None
         self.pasta_downloads = pasta_downloads()
+        self.nomes_cursos: dict[str, str] = {}
 
     # ---------- navegador ----------
     def __enter__(self):
@@ -406,6 +425,7 @@ class Plataforma:
             except OSError:
                 pass
         antes = set(self.pasta_downloads.iterdir())
+        self.nomes_cursos = self._nomes_dos_cursos()
         botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "exportar matriculas")
                               or drv.execute_script(_JS_ACHAR_BOTAO, "exportar matrículas"),
                               o_que="o botão \"Exportar Matriculas\"")
@@ -416,13 +436,7 @@ class Plataforma:
         textos = [(e.text or "").strip() for e in opcoes]
         if textos:
             self.log(f"Opções de exportação: {', '.join(t for t in textos if t)}")
-        escolhida = None
-        for chave in ("csv", "excel", "xlsx", "xls", "planilha"):
-            escolhida = next((e for e, t in zip(opcoes, textos) if chave in t.lower()), None)
-            if escolhida:
-                break
-        if not escolhida:
-            escolhida = next((e for e, t in zip(opcoes, textos) if t and "pdf" not in t.lower()), None)
+        escolhida = escolher_exportacao(opcoes, textos)
         if escolhida:
             self.log(f"Exportando: {escolhida.text.strip()}")
             self._clicar(escolhida)
@@ -440,6 +454,19 @@ class Plataforma:
                 f"Print e resumo da página salvos em:\n{pasta}")
         self.log(f"Lista exportada: {arquivo.name}")
         return arquivo
+
+    def _nomes_dos_cursos(self) -> dict[str, str]:
+        """ID -> nome dos cursos, lidos das listas de filtro da página (se houver)."""
+        try:
+            return self.driver.execute_script("""
+                const nomes = {};
+                for (const o of document.querySelectorAll('select option')) {
+                    const v = (o.value || '').trim(), t = (o.textContent || '').replace(/\\s+/g, ' ').trim();
+                    if (/^\\d+$/.test(v) && t && !/^\\d+$/.test(t)) nomes[v] = t;
+                }
+                return nomes;""") or {}
+        except WebDriverException:
+            return {}
 
     def _liberar_downloads(self):
         self.pasta_downloads.mkdir(parents=True, exist_ok=True)
@@ -499,13 +526,18 @@ class Plataforma:
         d = self.driver
         d.get(URL_MATRICULAS)
         lista = self._esperar(lambda drv: self._filtro_aluno(), o_que="a busca por aluno em Matrículas")
-        if not self._escolher_no_select2(lista, email or nome, nome, email):
-            if not email or not self._escolher_no_select2(lista, nome, nome, ""):
-                return []
+        # A busca da plataforma procura o texto inteiro: "Liliana Borges" não acha
+        # "Liliana Martins Borges". Tenta o e-mail, o nome, o login na regra do
+        # app (liliana.borges) e o sobrenome mais longo.
+        palavras = [w for w in sem_acento(nome).split() if len(w) > 2]
+        termos = [email, nome, email_base(nome), max(palavras, key=len) if palavras else ""]
+        termos = list(dict.fromkeys(t for t in termos if t))
+        if not any(self._escolher_no_select2(lista, t, nome, email, avisar=False) for t in termos):
+            self.log(f"\"{nome}\" não apareceu na busca por aluno.")
+            return []
         botao = self._esperar(lambda drv: drv.execute_script(_JS_ACHAR_BOTAO, "pesquisar matriculas")
                               or drv.execute_script(_JS_ACHAR_BOTAO, "pesquisar matrículas"),
                               o_que="o botão \"Pesquisar Matriculas\"")
-        alvo = normalizar(nome)
         tabela_antes = d.execute_script("return document.querySelector('table tbody');")
         self._clicar(botao)
 
@@ -522,7 +554,7 @@ class Plataforma:
             if linhas is None:
                 return False
             # sem recarregar, a tabela é trocada por AJAX: espera mostrar só o aluno
-            if recarregou or (linhas and all(normalizar(l[0]) == alvo for l in linhas)):
+            if recarregou or (linhas and all(mesmo_nome(nome, l[0]) for l in linhas)):
                 return ("ok", linhas)
             return False
 
@@ -530,7 +562,7 @@ class Plataforma:
             _, linhas = self._esperar(leu, 30)
         except TimeoutException:
             linhas = d.execute_script(_JS_LINHAS_MATRICULAS) or []
-        return [l for l in linhas if normalizar(l[0]) == alvo] or linhas
+        return [l for l in linhas if mesmo_nome(nome, l[0])]
 
     def _filtro_aluno(self):
         """A lista com pesquisa (select2) de aluno/usuário do filtro de Matrículas."""
@@ -544,7 +576,7 @@ class Plataforma:
                 || por(s => /usu[aá]rio|aluno|colaborador/i.test(txt(s)) && !/empresa|filial/i.test(txt(s)))
                 || null;""")
 
-    def _escolher_no_select2(self, lista, termo: str, nome: str, email: str) -> bool:
+    def _escolher_no_select2(self, lista, termo: str, nome: str, email: str, avisar: bool = True) -> bool:
         """Digita o termo na lista com pesquisa e escolhe a opção do aluno."""
         d = self.driver
         caixa = lista.find_element(By.XPATH, "following-sibling::span[contains(@class, 'select2')][1]"
@@ -582,11 +614,13 @@ class Plataforma:
             if (email and email.lower() in texto.lower()) or nome_opcao == alvo:
                 indice = i
                 break
-            if indice is None and all(p in nome_opcao.split() for p in alvo.split()):
+            email_opcao = re.search(r"[\w.+-]+@[\w.-]+", texto)
+            if indice is None and mesmo_nome(nome, nome_opcao, email_opcao.group() if email_opcao else ""):
                 indice = i
         if indice is None:
             campo.send_keys(Keys.ESCAPE)
-            self.log(f"\"{termo}\" não apareceu na busca por aluno.")
+            if avisar:
+                self.log(f"\"{termo}\" não apareceu na busca por aluno.")
             return False
         opcao = d.execute_script(
             "return document.querySelectorAll('.select2-container--open .select2-results__option')[arguments[0]];",
@@ -598,15 +632,25 @@ class Plataforma:
                 "arguments[0].dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));", opcao)
         return True
 
-    def baixar_certificado(self, aluno: str, curso: str, destino: Path, email: str = "") -> None:
-        """Pesquisa o aluno, abre Ações -> "Ver Certificado" do curso e salva em PDF."""
+    def baixar_certificado(self, aluno: str, curso: str, pasta: Path, email: str = "") -> tuple[Path, str]:
+        """Pesquisa o aluno, abre Ações -> "Ver Certificado" do curso e salva em PDF.
+
+        Devolve o arquivo salvo e o nome completo do curso como está na tela."""
         d = self.driver
         linhas = self._pesquisar_aluno(aluno, email)
-        alvo_curso = normalizar(curso)
-        indice = next((i for _, c, _, i in linhas if normalizar(c) == alvo_curso), None)
-        if indice is None:
-            pasta = self.salvar_diagnostico(f"matrícula de {aluno} em {curso}")
-            raise ErroPlataforma(f"Não achei a matrícula de {aluno} em \"{curso}\" na pesquisa. Print em {pasta}")
+        alvo = normalizar(curso)
+        escolhida = next((l for l in linhas if normalizar(l[1]) == alvo), None)
+        if not escolhida and alvo:  # nome parcial do curso
+            escolhida = next((l for l in linhas if all(p in normalizar(l[1]).split() for p in alvo.split())), None)
+        if not escolhida:  # a lista só trouxe o ID do curso: serve a única matrícula concluída
+            concluidas = [l for l in linhas if (ler_progresso(l[2]) or 0) >= 99.995]
+            escolhida = concluidas[0] if len(concluidas) == 1 else None
+        if escolhida:
+            curso, indice = escolhida[1], escolhida[3]
+            destino = pasta / nome_certificado(escolhida[0], curso)
+        else:
+            print_ = self.salvar_diagnostico(f"matrícula de {aluno} em {curso}")
+            raise ErroPlataforma(f"Não achei a matrícula de {aluno} em \"{curso}\" na pesquisa. Print em {print_}")
         linha = d.execute_script(_JS_LINHA_MATRICULA, indice)
         link = self._link_certificado(linha)
         janela = d.current_window_handle
@@ -616,7 +660,7 @@ class Plataforma:
             pdf = self._baixar_se_for_pdf(url)
             if pdf:
                 destino.write_bytes(pdf)
-                return
+                return destino, curso
             d.switch_to.new_window("tab")
             d.get(url)
         else:
@@ -636,6 +680,7 @@ class Plataforma:
             if d.current_window_handle != janela:
                 d.close()
             d.switch_to.window(janela)
+        return destino, curso
 
     def _link_certificado(self, linha):
         """O link "Ver Certificado" da linha (abre o menu Ações se precisar)."""

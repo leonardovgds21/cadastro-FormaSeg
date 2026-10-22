@@ -74,3 +74,20 @@ def test_procura_sem_acento_e_caixa_e_por_palavras():
 def test_nome_do_certificado():
     assert nome_certificado("bruno de oliveira", "NR 33 – Supervisor: Teórico") == \
         "Bruno de Oliveira - NR 33 – Supervisor Teórico.pdf"
+
+
+def test_prefere_coluna_de_nome_a_de_id_e_troca_id_do_curso_pelo_nome(tmp_path):
+    arquivo = tmp_path / "m.csv"
+    arquivo.write_text("ID do Aluno;Aluno;ID do Curso;Progresso\n"
+                       "101;Aline de Fátima Betti;82557;100%\n", encoding="utf-8")
+    m = ler_exportacao(arquivo, {"82557": "NR 33 – Trabalhador Autorizado E Vigia – Teórico"})
+    assert (m[0].aluno, m[0].curso) == ("Aline de Fátima Betti", "NR 33 – Trabalhador Autorizado E Vigia – Teórico")
+    assert procurar(["Aline De Fatima Betti"], m)[0].matriculas == m
+
+
+def test_acha_pelo_login_na_regra_do_app():
+    lista = [Matricula("aline.betti2", "NR 06", 50), Matricula("Fulano", "NR 06", 0, email="joao.nascimento@gapgestao.com.br")]
+    r = procurar(["Aline De Fatima Betti", "Joao Carlos Soares Nascimento", "Paulo Marlon Da Costa Quinteiro Junior"], lista)
+    assert [m.aluno for m in r[0].matriculas] == ["aline.betti2"]
+    assert [m.aluno for m in r[1].matriculas] == ["Fulano"]
+    assert r[2].matriculas == []

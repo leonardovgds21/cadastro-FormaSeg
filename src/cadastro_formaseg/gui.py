@@ -18,7 +18,7 @@ from . import __version__, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
-from .monitoramento import ler_exportacao, nome_certificado, nomes_colados, procurar
+from .monitoramento import Resultado, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
 AVISO_JA_EXISTE = "já existe, só matrícula (confira se é a mesma pessoa)"
@@ -505,12 +505,12 @@ class DialogoLogin(tk.Toplevel):
             self.destroy()
 
 
-def guardar_para_diagnostico(arquivo: Path) -> Path | None:
+def guardar_para_diagnostico(arquivo: Path, nome: str = "") -> Path | None:
     """Copia a lista exportada para dados/erros, para entender o formato."""
     try:
         pasta = pasta_dados() / "erros"
         pasta.mkdir(parents=True, exist_ok=True)
-        destino = pasta / f"{datetime.now():%Y-%m-%d_%H%M%S}_exportacao{arquivo.suffix}"
+        destino = pasta / f"{nome or datetime.now().strftime('%Y-%m-%d_%H%M%S_exportacao')}{arquivo.suffix}"
         shutil.copyfile(arquivo, destino)
         return destino
     except OSError:
@@ -602,20 +602,35 @@ class JanelaMonitoramento(tk.Toplevel):
         try:
             with Plataforma(log=log, visivel=visivel) as p:
                 p.login(usuario, senha)
+                resultados = []
                 try:
                     arquivo = p.exportar_matriculas()
+                    guardar_para_diagnostico(arquivo, "ultima_exportacao")
                     try:
-                        resultados = procurar(nomes, ler_exportacao(arquivo))
+                        matriculas = ler_exportacao(arquivo, {**self.app.nome_por_id, **p.nomes_cursos})
                     except (OSError, ValueError):
                         copia = guardar_para_diagnostico(arquivo)
                         raise ErroPlataforma(
                             f"Não consegui ler a lista exportada ({arquivo.name}). Cópia em: {copia}") from None
+                    alunos = {normalizar(m.aluno) for m in matriculas}
+                    log(f"Lista exportada: {len(matriculas)} matrícula(s) de {len(alunos)} aluno(s).")
+                    resultados = procurar(nomes, matriculas)
                 except ErroPlataforma as erro:
                     log(f"AVISO: {erro}")
-                    log("Buscando aluno por aluno na tela de Matrículas...")
-                    resultados = []
-                    for nome in nomes:
-                        resultados += procurar([nome], p.matriculas_do_aluno(nome))
+                # A exportação pode não trazer todas as matrículas: quem faltou é
+                # procurado um a um na tela de Matrículas.
+                faltam = [i for i, r in enumerate(resultados) if not r.matriculas] if resultados else list(range(len(nomes)))
+                if not resultados:
+                    resultados = [Resultado(nome, []) for nome in nomes]
+                if faltam:
+                    log(f"Procurando {len(faltam)} nome(s) um a um na tela de Matrículas...")
+                for n, i in enumerate(faltam, 1):
+                    nome = resultados[i].procurado
+                    log(f"({n}/{len(faltam)}) {nome}")
+                    try:
+                        resultados[i] = procurar([nome], p.matriculas_do_aluno(nome))[0]
+                    except ErroPlataforma as erro:
+                        log(f"AVISO: {nome}: {str(erro).splitlines()[0]}")
                 pasta = pasta_certificados()
                 for r in resultados:
                     if not r.matriculas:
@@ -625,7 +640,7 @@ class JanelaMonitoramento(tk.Toplevel):
                         if m.concluida:
                             situacao, tag = "concluído", "ok"
                             if baixar:
-                                situacao, tag = self._certificado(p, m, pasta / nome_certificado(m.aluno, m.curso), log)
+                                situacao, tag = self._certificado(p, m, pasta, log)
                         progresso = f"{m.progresso:g}%" if m.progresso is not None else (m.texto_progresso or "?")
                         self.fila.put(("linha", (m.aluno, m.curso, progresso, situacao), tag))
                 achados = sum(1 for r in resultados if r.matriculas)
@@ -639,12 +654,12 @@ class JanelaMonitoramento(tk.Toplevel):
             self.fila.put(("liberar", None))
 
     @staticmethod
-    def _certificado(p, m, destino: Path, log) -> tuple[str, str]:
-        if destino.exists():
+    def _certificado(p, m, pasta: Path, log) -> tuple[str, str]:
+        if (pasta / nome_certificado(m.aluno, m.curso)).exists():
             return "já baixado", "ok"
         log(f"Baixando o certificado de {m.aluno} ({m.curso})...")
         try:
-            p.baixar_certificado(m.aluno, m.curso, destino, m.email)
+            destino, m.curso = p.baixar_certificado(m.aluno, m.curso, pasta, m.email)
         except Exception as erro:  # um certificado com problema não para os outros
             detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
             log(f"ERRO no certificado de {m.aluno}: {detalhe[0] if detalhe else type(erro).__name__}")
