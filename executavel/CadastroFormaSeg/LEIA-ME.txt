@@ -28,6 +28,17 @@ Como usar
    - Os e-mails dos alunos também ficam copiados (Ctrl+V), por exemplo
      para colar no campo Cco.
 
+7. Monitoramento (botão no canto de cima): cole os nomes dos
+   colaboradores, um por linha (um só ou vários de uma vez), e clique em
+   "Buscar progresso". O app exporta a lista de Matrículas da plataforma
+   (com o navegador escondido) e mostra aluno, curso e progresso. Os
+   nomes podem estar com ou sem acento, em maiúsculas ou minúsculas.
+   - Quem está com 100% tem o certificado baixado em PDF para a pasta
+     assets\certificados, com o nome "Nome - Curso.pdf". Certificado que
+     já está na pasta não é baixado de novo.
+   - "Copiar resultado" copia a tabela para colar no Excel ou num e-mail.
+   - Nada é alterado na plataforma: o monitoramento só lê.
+
 Regras
 - E-mail e usuário: primeironome.ultimonome@gapgestao.com.br (sem acento;
   ignora Filho, Júnior, Neto...). Se já existir, vira nome.sobrenome2, 3...
@@ -39,6 +50,8 @@ Arquivos desta pasta
 - saida\              CSVs gerados (um subpasta por envio). Contém CPF:
                       não compartilhe.
 - dados\historico.csv E-mails já gerados neste computador (sem CPF).
+- dados\downloads\   Última lista de matrículas exportada no monitoramento.
+- assets\certificados\ Certificados baixados (PDF).
 
 Para usar em outro computador, copie a pasta CadastroFormaSeg inteira.
 Precisa do Microsoft Edge (já vem no Windows) e de internet.
