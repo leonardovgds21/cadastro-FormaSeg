@@ -23,9 +23,10 @@ Como usar
    escolha o treinamento e clique só neste botão). Quem já foi cadastrado
    neste computador volta com o mesmo e-mail, com o aviso "já cadastrado
    em <data>". Abre um e-mail novo no Outlook com os alunos no campo
-   Para e o assunto. A mensagem, no padrão visual da GAP (logo, treinamentos,
-   data de hoje como data de início e dados de acesso), fica copiada:
-   clique no corpo do e-mail e cole com Ctrl+V. Confira e clique em Enviar.
+   Para, o assunto e o texto (treinamentos, data de hoje como data de
+   início e dados de acesso). A versão formatada no padrão visual da GAP
+   (com logo) fica copiada: para usá-la, clique no corpo do e-mail, aperte
+   Ctrl+A e depois Ctrl+V. Confira e clique em Enviar.
    Se os alunos estão em treinamentos diferentes, abre um e-mail para cada
    treinamento. Quem está sem treinamento fica de fora.
    - Se abrir outro programa, em Configurações > Aplicativos > Aplicativos
