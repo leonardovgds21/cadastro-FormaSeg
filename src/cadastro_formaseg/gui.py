@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from . import __version__, credenciais, email_alunos, historico
+from . import __version__, area_transferencia, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
@@ -255,7 +255,8 @@ class App(tk.Tk):
                 return
 
     def _abrir_email(self, email: email_alunos.Email) -> bool:
-        link, com_dest, com_corpo = email_alunos.preparar_link(email.destinatarios, email.assunto, email.corpo)
+        # O mailto: leva só destinatários e assunto; o corpo formatado é colado (Ctrl+V).
+        link, com_dest, _ = email_alunos.preparar_link(email.destinatarios, email.assunto, "")
         destinatarios = "; ".join(email.destinatarios)
         try:
             if sys.platform == "win32":
@@ -278,13 +279,14 @@ class App(tk.Tk):
                                 "São muitos destinatários para caber no link. Os e-mails foram copiados:\n"
                                 "cole no campo Para (ou Cco) do e-mail que abriu.\n\n"
                                 "Clique OK depois de colar para copiar o texto da mensagem.")
-        if not com_corpo:
-            self._copiar(email.corpo)
-            messagebox.showinfo("E-mail aos alunos",
-                                "O texto da mensagem é grande demais para o link e foi copiado:\n"
-                                "cole no corpo do e-mail (Ctrl+V).")
+        if area_transferencia.copiar_html(email.html, email.corpo):
+            aviso = "A mensagem formatada foi copiada."
         else:
-            self._copiar(destinatarios)
+            self._copiar(email.corpo)
+            aviso = "A mensagem foi copiada (sem formatação)."
+        messagebox.showinfo("E-mail aos alunos",
+                            f"{aviso}\n\nNo e-mail que abriu no Outlook, clique no corpo da mensagem "
+                            "e cole com Ctrl+V. Confira e clique em Enviar.")
         return True
 
     def _copiar(self, texto: str):

@@ -57,3 +57,33 @@ def test_link_longo_tira_corpo_e_depois_destinatarios():
     muitos = [f"aluno{i}@gapgestao.com.br" for i in range(200)]
     link, dest, corpo = preparar_link(muitos, "Assunto", "texto")
     assert not dest and not corpo and len(link) <= LIMITE_MAILTO
+
+
+def test_corpo_html_no_padrao_gap():
+    e = montar_emails([aluno("Maria", "m@x.com", ["82853", "74122"])], CURSOS, "22/10/2026")[0][0]
+    assert "data:image/png;base64," in e.html  # logo embutida
+    assert "Olá! Tudo bem?" in e.html and "ATENÇÃO:" in e.html
+    assert "1. Seus treinamentos" in e.html and "nos cursos abaixo" in e.html
+    assert "NR 33 – Supervisor de Entrada – Teórico" in e.html and "22/10/2026" in e.html
+    assert 'href="https://gapgestao.sstnr.com/painel/"' in e.html
+    assert "seu CPF" in e.html
+
+
+def test_corpo_html_um_curso_e_escape():
+    e = montar_emails([aluno("Maria", "m@x.com", ["9"])], {"9": "NR <A> & B"}, "01/01/2027")[0][0]
+    assert "1. Seu treinamento" in e.html and "no curso abaixo" in e.html
+    assert "NR &lt;A&gt; &amp; B" in e.html
+
+
+def test_logo_sem_arquivo_vira_texto(tmp_path):
+    from cadastro_formaseg.email_alunos import logo_html
+    assert "<img" not in logo_html(tmp_path / "nao_existe.png")
+
+
+def test_formato_cf_html_posicoes():
+    from cadastro_formaseg.area_transferencia import formato_cf_html
+    dados = formato_cf_html("<b>Olá</b>")
+    cab = dict(l.split(":", 1) for l in dados.split(b"\r\n")[1:5] for l in [l.decode()])
+    assert dados[int(cab["StartFragment"]):int(cab["EndFragment"])].decode("utf-8") == "<b>Olá</b>"
+    assert dados[int(cab["StartHTML"]):int(cab["EndHTML"])].decode().startswith("<html>")
+    assert int(cab["EndHTML"]) == len(dados)
