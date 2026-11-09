@@ -19,14 +19,15 @@ Como usar
    escolha o treinamento e clique só neste botão). Quem já foi cadastrado
    neste computador volta com o mesmo e-mail, com o aviso "já cadastrado
    em <data>". Abre um e-mail novo no Outlook com os alunos no campo
-   Para e o texto padrão, com os treinamentos e a data de hoje como Data
-   de Início. Se os alunos estão em treinamentos diferentes, abre um
-   e-mail para cada treinamento. Quem está sem treinamento fica de fora.
-   Confira e clique em Enviar no Outlook.
+   Para e o assunto. A mensagem, no padrão visual da GAP (logo, treinamentos,
+   data de hoje como data de início e dados de acesso), fica copiada:
+   clique no corpo do e-mail e cole com Ctrl+V. Confira e clique em Enviar.
+   Se os alunos estão em treinamentos diferentes, abre um e-mail para cada
+   treinamento. Quem está sem treinamento fica de fora.
    - Se abrir outro programa, em Configurações > Aplicativos > Aplicativos
      padrão, escolha o Outlook (novo) para o tipo de link MAILTO.
-   - Os e-mails dos alunos também ficam copiados (Ctrl+V), por exemplo
-     para colar no campo Cco.
+   - A logo é o arquivo config\logo_gap.png. Para trocar, substitua o
+     arquivo por outro PNG com o mesmo nome.
 
 7. Monitoramento (botão no canto de cima): cole os nomes dos
    colaboradores, um por linha (um só ou vários de uma vez), e clique em
