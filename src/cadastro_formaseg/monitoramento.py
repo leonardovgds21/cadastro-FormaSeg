@@ -24,6 +24,7 @@ class Matricula:
     progresso: float | None  # 0 a 100; None se a lista não trouxer
     texto_progresso: str = ""
     email: str = ""
+    conclusao: str = ""  # data de conclusão (dd/mm/aaaa), se souber
 
     @property
     def concluida(self) -> bool:
@@ -147,7 +148,9 @@ def ler_exportacao(arquivo: Path, nomes_cursos: dict[str, str] | None = None) ->
         raise ValueError("A lista exportada não tem as colunas de aluno e curso. "
                          f"Cabeçalho encontrado: {linhas[0] if linhas else 'arquivo vazio'}")
     i_sobrenome = _coluna(cabecalho, "sobrenome", "last name")
-    i_progresso = _coluna(cabecalho, "progresso", "progress", "conclus", "%")
+    i_progresso = _coluna(cabecalho, "progresso", "progress", "%", evitar=("data", "date"))
+    i_conclusao = next((i for i, c in enumerate(cabecalho) if re.search(
+        r"conclus|finaliz|termin", normalizar(c)) and not re.search(r"progres|%", normalizar(c))), None)
     i_email = _coluna(cabecalho, "e-mail", "email")
 
     def celula(linha, i):
@@ -161,8 +164,45 @@ def ler_exportacao(arquivo: Path, nomes_cursos: dict[str, str] | None = None) ->
         texto = celula(linha, i_progresso)
         curso = celula(linha, i_curso)
         curso = (nomes_cursos or {}).get(curso.lstrip("#"), curso)
-        matriculas.append(Matricula(aluno, curso, ler_progresso(texto), texto, celula(linha, i_email)))
+        matriculas.append(Matricula(aluno, curso, ler_progresso(texto), texto, celula(linha, i_email),
+                                    formatar_data(celula(linha, i_conclusao))))
     return matriculas
+
+
+# ---------- data de conclusão ----------
+MESES = ["janeiro", "fevereiro", "marco", "abril", "maio", "junho", "julho",
+         "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def formatar_data(texto: str) -> str:
+    """'6 de setembro de 2026', '2026-09-06 19:06' ou '06/09/26' -> '06/09/2026' ("" se não for data)."""
+    t = normalizar(texto)
+    if m := re.search(r"(\d{1,2})\s+de\s+([a-z]+)\s+de\s+(\d{4})", t):
+        if m.group(2) in MESES:
+            return f"{int(m.group(1)):02d}/{MESES.index(m.group(2)) + 1:02d}/{m.group(3)}"
+    if m := re.search(r"(\d{4})-(\d{2})-(\d{2})", t):
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    if m := re.search(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", t):
+        ano = m.group(3) if len(m.group(3)) == 4 else "20" + m.group(3)
+        return f"{int(m.group(1)):02d}/{int(m.group(2)):02d}/{ano}"
+    return ""
+
+
+def conclusao_no_certificado(texto: str) -> str:
+    """A data depois de "Data de Conclusão" no texto do certificado."""
+    m = re.search(r"data\s+de\s+conclusao\W*(.{0,40})", normalizar(texto))
+    return formatar_data(m.group(1)) if m else ""
+
+
+def conclusao_no_pdf(arquivo: Path) -> str:
+    """Lê a data de conclusão de um certificado já salvo."""
+    try:
+        import pdfplumber
+
+        with pdfplumber.open(arquivo) as pdf:
+            return conclusao_no_certificado("\n".join(pg.extract_text() or "" for pg in pdf.pages[:2]))
+    except Exception:  # PDF ilegível: só fica sem a data
+        return ""
 
 
 # ---------- busca dos nomes ----------

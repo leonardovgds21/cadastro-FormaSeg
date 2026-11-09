@@ -18,7 +18,7 @@ from . import __version__, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
 from .ficha import ler_fichas
 from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
-from .monitoramento import Resultado, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar
+from .monitoramento import Resultado, conclusao_no_pdf, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
 AVISO_JA_EXISTE = "já existe, só matrícula (confira se é a mesma pessoa)"
@@ -531,11 +531,11 @@ class JanelaMonitoramento(tk.Toplevel):
         super().__init__(app)
         self.app = app
         self.title("Monitoramento de treinamentos")
-        self.geometry("980x600")
+        self.geometry("1080x600")
         self.minsize(760, 480)
         self.fila: queue.Queue = queue.Queue()
         self.rodando = False
-        self.linhas: list[tuple[str, str, str, str]] = []
+        self.linhas: list[tuple[str, ...]] = []
 
         quadro = ttk.Frame(self, padding=8)
         quadro.pack(fill="both", expand=True)
@@ -553,10 +553,11 @@ class JanelaMonitoramento(tk.Toplevel):
                    command=lambda: abrir_pasta(pasta_certificados())).pack(side="right")
         ttk.Button(botoes, text="Copiar resultado", command=self.copiar).pack(side="right", padx=6)
 
-        colunas = ("aluno", "curso", "progresso", "certificado")
+        colunas = ("aluno", "curso", "progresso", "conclusao", "certificado")
         self.tabela = ttk.Treeview(quadro, columns=colunas, show="headings")
-        for col, titulo, largura in [("aluno", "Aluno", 240), ("curso", "Curso", 340),
-                                     ("progresso", "Progresso", 80), ("certificado", "Certificado", 220)]:
+        for col, titulo, largura in [("aluno", "Aluno", 220), ("curso", "Curso", 320),
+                                     ("progresso", "Progresso", 75), ("conclusao", "Conclusão", 85),
+                                     ("certificado", "Certificado", 200)]:
             self.tabela.heading(col, text=titulo)
             self.tabela.column(col, width=largura, anchor="w")
         self.tabela.tag_configure("ok", foreground="#15803d")
@@ -634,7 +635,7 @@ class JanelaMonitoramento(tk.Toplevel):
                 pasta = pasta_certificados()
                 for r in resultados:
                     if not r.matriculas:
-                        self.fila.put(("linha", (r.procurado, "não encontrado nas matrículas", "-", ""), "falta"))
+                        self.fila.put(("linha", (r.procurado, "não encontrado nas matrículas", "-", "", ""), "falta"))
                     for m in r.matriculas:
                         if len(m.aluno.split()) < len(r.procurado.split()):
                             m.aluno = r.procurado  # a lista trouxe só o primeiro nome
@@ -644,7 +645,8 @@ class JanelaMonitoramento(tk.Toplevel):
                             if baixar:
                                 situacao, tag = self._certificado(p, m, pasta, log)
                         progresso = f"{m.progresso:g}%" if m.progresso is not None else (m.texto_progresso or "?")
-                        self.fila.put(("linha", (m.aluno, m.curso, progresso, situacao), tag))
+                        conclusao = m.conclusao if m.concluida else ""
+                        self.fila.put(("linha", (m.aluno, m.curso, progresso, conclusao, situacao), tag))
                 achados = sum(1 for r in resultados if r.matriculas)
                 self.fila.put(("fim", f"Pronto: {achados} de {len(nomes)} colaborador(es) encontrados."))
         except ErroPlataforma as erro:
@@ -657,11 +659,14 @@ class JanelaMonitoramento(tk.Toplevel):
 
     @staticmethod
     def _certificado(p, m, pasta: Path, log) -> tuple[str, str]:
-        if (pasta / nome_certificado(m.aluno, m.curso)).exists():
+        salvo = pasta / nome_certificado(m.aluno, m.curso)
+        if salvo.exists():
+            m.conclusao = m.conclusao or conclusao_no_pdf(salvo)
             return "já baixado", "ok"
         log(f"Baixando o certificado de {m.aluno} ({m.curso})...")
         try:
-            destino, m.curso = p.baixar_certificado(m.aluno, m.curso, pasta, m.email)
+            destino, m.curso, conclusao = p.baixar_certificado(m.aluno, m.curso, pasta, m.email)
+            m.conclusao = m.conclusao or conclusao
         except Exception as erro:  # um certificado com problema não para os outros
             detalhe = (getattr(erro, "msg", None) or str(erro)).strip().splitlines()
             log(f"ERRO no certificado de {m.aluno}: {detalhe[0] if detalhe else type(erro).__name__}")
@@ -669,7 +674,7 @@ class JanelaMonitoramento(tk.Toplevel):
         return f"salvo: {destino.name}", "ok"
 
     def copiar(self):
-        texto = "\n".join("\t".join(l) for l in [("Aluno", "Curso", "Progresso", "Certificado")] + self.linhas)
+        texto = "\n".join("\t".join(l) for l in [("Aluno", "Curso", "Progresso", "Conclusão", "Certificado")] + self.linhas)
         self.clipboard_clear()
         self.clipboard_append(texto)
         self.escrever("Resultado copiado (cole no Excel ou no e-mail).")
