@@ -16,8 +16,8 @@ from tkinter import filedialog, messagebox, ttk
 
 from . import __version__, area_transferencia, credenciais, email_alunos, historico
 from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
-from .ficha import ler_fichas
-from .gerador import Aluno, gerar_csv_alunos, gerar_csv_cursos, montar_alunos, validar
+from .ficha import Colaborador, ler_fichas
+from .gerador import Aluno, cpf_valido, gerar_csv_alunos, gerar_csv_cursos, montar_aluno, montar_alunos, validar
 from .monitoramento import Resultado, conclusao_no_pdf, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
@@ -60,6 +60,7 @@ class App(tk.Tk):
         topo = ttk.Frame(self, padding=8)
         topo.pack(fill="x")
         ttk.Button(topo, text="Abrir ficha (PDF)...", command=self.abrir_ficha).pack(side="left")
+        ttk.Button(topo, text="Digitar colaborador...", command=self.digitar_colaborador).pack(side="left", padx=(6, 0))
         self.lbl_arquivo = ttk.Label(topo, text="Nenhuma ficha aberta")
         self.lbl_arquivo.pack(side="left", padx=10)
         ttk.Button(topo, text="Monitoramento", command=lambda: JanelaMonitoramento(self)).pack(side="right")
@@ -146,7 +147,8 @@ class App(tk.Tk):
             messagebox.showerror("Erro ao ler a ficha", str(erro))
             return
         if not colaboradores:
-            messagebox.showwarning("Ficha", "Nenhuma ficha de registro de empregado encontrada nesse PDF.")
+            messagebox.showwarning("Ficha", "Nenhuma ficha de registro de empregado encontrada nesse PDF.\n\n"
+                                   "Se a ficha estiver mal formatada, use \"Digitar colaborador...\".")
             return
         existentes = self._emails_existentes()
         self.alunos = montar_alunos(colaboradores, existentes)
@@ -157,6 +159,23 @@ class App(tk.Tk):
             self.escrever(f"{ja_cadastrados} já cadastrado(s) neste computador: mantive o e-mail usado antes.")
         self.btn_email.config(state="normal")
         self._recarregar_tabela(selecionar=0)
+
+    def digitar_colaborador(self):
+        """Inclui na lista um colaborador digitado à mão (ficha que o app não consegue ler)."""
+        dialogo = DialogoColaborador(self)
+        if not dialogo.resultado:
+            return
+        usados = self._emails_existentes() | {a.email for a in self.alunos}
+        aluno = montar_aluno(dialogo.resultado, usados)
+        aluno.avisos.append("digitado à mão")
+        historico.reaproveitar_emails([aluno], historico.ultimo_cadastro_por_nome())
+        if aluno.email in {a.email for a in self.alunos}:  # o e-mail reaproveitado já está na lista
+            aluno.email = montar_aluno(dialogo.resultado, usados).email
+        self.alunos.append(aluno)
+        self.lbl_arquivo.config(text=f"{len(self.alunos)} colaborador(es) na lista")
+        self.escrever(f"Colaborador digitado: {aluno.nome} {aluno.sobrenome} ({aluno.email}).")
+        self.btn_email.config(state="normal")
+        self._recarregar_tabela(selecionar=len(self.alunos) - 1)
 
     def _emails_existentes(self) -> set[str]:
         return historico.emails_registrados()
@@ -467,6 +486,59 @@ class App(tk.Tk):
         self.log.see("end")
         self.log.config(state="disabled")
         self.update_idletasks()
+
+
+class DialogoColaborador(tk.Toplevel):
+    """Os mesmos dados que o app procura na ficha, digitados à mão."""
+
+    CAMPOS = [
+        ("nome_completo", "Nome completo *"), ("cpf", "CPF *"), ("cep", "CEP"),
+        ("endereco", "Endereço (rua)"), ("numero", "Número"), ("complemento", "Complemento"),
+        ("bairro", "Bairro"), ("cidade", "Cidade"), ("estado", "Estado (UF)"),
+        ("telefone", "Telefone"), ("celular", "Celular"),
+    ]
+
+    def __init__(self, pai):
+        super().__init__(pai)
+        self.title("Digitar colaborador")
+        self.resizable(False, False)
+        self.transient(pai)
+        self.resultado: Colaborador | None = None
+        self.vars = {campo: tk.StringVar() for campo, _ in self.CAMPOS}
+
+        quadro = ttk.Frame(self, padding=12)
+        quadro.pack()
+        ttk.Label(quadro, text="Preencha com os dados da ficha. E-mail, usuário e senha são gerados\n"
+                               "pelas mesmas regras da leitura automática.").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        primeira = None
+        for i, (campo, rotulo) in enumerate(self.CAMPOS, start=1):
+            ttk.Label(quadro, text=rotulo).grid(row=i, column=0, sticky="w", padx=(0, 8), pady=2)
+            entrada = ttk.Entry(quadro, textvariable=self.vars[campo], width=44)
+            entrada.grid(row=i, column=1, sticky="we", pady=2)
+            primeira = primeira or entrada
+        botoes = ttk.Frame(quadro)
+        botoes.grid(row=len(self.CAMPOS) + 1, column=0, columnspan=2, pady=(10, 0), sticky="e")
+        ttk.Button(botoes, text="Cancelar", command=self.destroy).pack(side="right")
+        ttk.Button(botoes, text="Incluir na lista", command=self._ok).pack(side="right", padx=6)
+        self.bind("<Return>", lambda _: self._ok())
+        self.bind("<Escape>", lambda _: self.destroy())
+        primeira.focus_set()
+        self.grab_set()
+        pai.wait_window(self)
+
+    def _ok(self):
+        dados = {campo: var.get().strip() for campo, var in self.vars.items()}
+        if len(dados["nome_completo"].split()) < 2:
+            messagebox.showwarning("Digitar colaborador", "Informe o nome completo (nome e sobrenome).", parent=self)
+            return
+        if not cpf_valido(dados["cpf"]):
+            messagebox.showwarning("Digitar colaborador", "CPF inválido. Confira os números.", parent=self)
+            return
+        dados["nome_completo"] = dados["nome_completo"].upper()  # como vem da ficha
+        dados["estado"] = dados["estado"].upper()
+        self.resultado = Colaborador(**dados)
+        self.destroy()
 
 
 class DialogoLogin(tk.Toplevel):
