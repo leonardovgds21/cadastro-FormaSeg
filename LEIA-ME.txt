@@ -41,6 +41,8 @@ Como usar
      Matrículas (pelo nome, pelo e-mail nome.sobrenome e pelo sobrenome).
      Com muitos nomes isso leva alguns minutos; acompanhe pelo registro.
    - O curso aparece com o nome completo, como está na plataforma.
+   - Para quem está com 100%, a coluna "Conclusão" mostra a data de
+     conclusão do treinamento (tirada do certificado).
    - "Copiar resultado" copia a tabela para colar no Excel ou num e-mail.
    - Nada é alterado na plataforma: o monitoramento só lê.
 

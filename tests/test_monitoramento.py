@@ -91,3 +91,20 @@ def test_acha_pelo_login_na_regra_do_app():
     assert [m.aluno for m in r[0].matriculas] == ["aline.betti2"]
     assert [m.aluno for m in r[1].matriculas] == ["Fulano"]
     assert r[2].matriculas == []
+
+
+def test_data_de_conclusao():
+    from cadastro_formaseg.monitoramento import conclusao_no_certificado, formatar_data
+    texto = "Concluiu o treinamento de NR 33\nData de Matrícula 1 de setembro de 2026\nData de Conclusão 6 de setembro de 2026\nCarga"
+    assert conclusao_no_certificado(texto) == "06/09/2026"
+    assert formatar_data("2026-09-06 19:06:00") == "06/09/2026"
+    assert formatar_data("6/9/26") == "06/09/2026"
+    assert formatar_data("Sim") == ""
+
+
+def test_conclusao_na_lista_exportada(tmp_path):
+    arquivo = tmp_path / "m.csv"
+    arquivo.write_text("Aluno;Curso;Data de Início;Data de Conclusão;Progresso\n"
+                       "Ana Lima;NR 06;01/09/2026;06/09/2026;100%\n", encoding="utf-8")
+    m = ler_exportacao(arquivo)[0]
+    assert (m.progresso, m.conclusao) == (100, "06/09/2026")

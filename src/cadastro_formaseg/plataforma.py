@@ -34,7 +34,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from .config import URL_PAINEL, pasta_dados, pasta_downloads
 from .gerador import email_base, sem_acento
-from .monitoramento import Matricula, ler_progresso, mesmo_nome, nome_certificado, normalizar
+from .monitoramento import (
+    Matricula, conclusao_no_certificado, conclusao_no_pdf, ler_progresso, mesmo_nome, nome_certificado, normalizar)
 
 URL_BASE = URL_PAINEL.split("/painel")[0]
 URL_MATRICULAS = f"{URL_BASE}/dash/my/lms-enrollments/"
@@ -635,10 +636,11 @@ class Plataforma:
                 "arguments[0].dispatchEvent(new MouseEvent('mouseup', {bubbles: true}));", opcao)
         return True
 
-    def baixar_certificado(self, aluno: str, curso: str, pasta: Path, email: str = "") -> tuple[Path, str]:
+    def baixar_certificado(self, aluno: str, curso: str, pasta: Path, email: str = "") -> tuple[Path, str, str]:
         """Pesquisa o aluno, abre Ações -> "Ver Certificado" do curso e salva em PDF.
 
-        Devolve o arquivo salvo e o nome completo do curso como está na tela."""
+        Devolve o arquivo salvo, o nome completo do curso como está na tela e
+        a data de conclusão escrita no certificado ("" se não achar)."""
         d = self.driver
         linhas = self._pesquisar_aluno(aluno, email)
         alvo = normalizar(curso)
@@ -663,7 +665,7 @@ class Plataforma:
             pdf = self._baixar_se_for_pdf(url)
             if pdf:
                 destino.write_bytes(pdf)
-                return destino, curso
+                return destino, curso, conclusao_no_pdf(destino)
             d.switch_to.new_window("tab")
             d.get(url)
         else:
@@ -674,6 +676,7 @@ class Plataforma:
         try:
             self._esperar(lambda drv: drv.execute_script("return document.readyState") == "complete", 60)
             time.sleep(2)  # imagens e assinaturas
+            conclusao = conclusao_no_certificado(d.execute_script("return document.body.innerText") or "")
             pdf = d.execute_cdp_cmd("Page.printToPDF", {
                 "printBackground": True, "landscape": True, "preferCSSPageSize": True,
                 "marginTop": 0, "marginBottom": 0, "marginLeft": 0, "marginRight": 0,
@@ -683,7 +686,7 @@ class Plataforma:
             if d.current_window_handle != janela:
                 d.close()
             d.switch_to.window(janela)
-        return destino, curso
+        return destino, curso, conclusao
 
     def _link_certificado(self, linha):
         """O link "Ver Certificado" da linha (abre o menu Ações se precisar)."""
