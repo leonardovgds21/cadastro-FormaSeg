@@ -17,7 +17,8 @@ Copie a pasta `executavel/CadastroFormaSeg` para o computador e abra
 | `src/cadastro_formaseg/ficha.py` | Lê o PDF (um colaborador por página) |
 | `src/cadastro_formaseg/gerador.py` | Regras de e-mail/senha e CSVs `import.csv` e `import-curso.csv` |
 | `src/cadastro_formaseg/gui.py` | Tela (Tkinter) |
-| `src/cadastro_formaseg/email_alunos.py` | E-mail aos alunos (link mailto: para o Outlook) |
+| `src/cadastro_formaseg/email_alunos.py` | E-mail aos alunos (mailto: para o Outlook + corpo em HTML no padrão GAP) |
+| `src/cadastro_formaseg/area_transferencia.py` | Copia o HTML para a área de transferência do Windows |
 | `src/cadastro_formaseg/monitoramento.py` | Lê a lista exportada de matrículas e acha os nomes |
 | `src/cadastro_formaseg/plataforma.py` | Login, importação, exportação de matrículas e certificados (Selenium + Edge) |
 | `src/cadastro_formaseg/credenciais.py` | Login no Cofre de Credenciais do Windows |
