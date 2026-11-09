@@ -25,8 +25,12 @@ def formato_cf_html(fragmento: str) -> bytes:
     return _CABECALHO.format(tam, fim_html, ini_frag, fim_frag).encode("ascii") + inicio + frag + fim
 
 
-def copiar_html(html: str, texto: str) -> bool:
-    """Copia HTML + texto simples. Devolve False fora do Windows ou se falhar."""
+def copiar_html(html: str, texto: str, janela: int | None = None) -> bool:
+    """Copia HTML + texto simples. Devolve False fora do Windows ou se falhar.
+
+    `janela` é o HWND do app: com a área de transferência aberta sem dono, o
+    Windows pode recusar os dados depois de esvaziá-la.
+    """
     if sys.platform != "win32":
         return False
     import ctypes
@@ -61,7 +65,7 @@ def copiar_html(html: str, texto: str) -> bool:
             raise OSError("o Windows recusou os dados")
 
     for _ in range(10):  # outro programa pode estar com a área de transferência aberta
-        if user32.OpenClipboard(None):
+        if user32.OpenClipboard(janela):
             break
         time.sleep(0.1)
     else:

@@ -274,8 +274,9 @@ class App(tk.Tk):
                 return
 
     def _abrir_email(self, email: email_alunos.Email) -> bool:
-        # O mailto: leva só destinatários e assunto; o corpo formatado é colado (Ctrl+V).
-        link, com_dest, _ = email_alunos.preparar_link(email.destinatarios, email.assunto, "")
+        # O mailto: só aceita texto simples: ele já leva o corpo em texto (quando cabe), para o
+        # e-mail nunca abrir vazio. A versão formatada fica copiada para colar por cima (Ctrl+V).
+        link, com_dest, com_corpo = email_alunos.preparar_link(email.destinatarios, email.assunto, email.corpo)
         destinatarios = "; ".join(email.destinatarios)
         try:
             if sys.platform == "win32":
@@ -298,15 +299,25 @@ class App(tk.Tk):
                                 "São muitos destinatários para caber no link. Os e-mails foram copiados:\n"
                                 "cole no campo Para (ou Cco) do e-mail que abriu.\n\n"
                                 "Clique OK depois de colar para copiar o texto da mensagem.")
-        if area_transferencia.copiar_html(email.html, email.corpo):
-            aviso = "A mensagem formatada foi copiada."
-        else:
+        formatado = area_transferencia.copiar_html(email.html, email.corpo, self._hwnd())
+        if not formatado:
             self._copiar(email.corpo)
-            aviso = "A mensagem foi copiada (sem formatação)."
-        messagebox.showinfo("E-mail aos alunos",
-                            f"{aviso}\n\nNo e-mail que abriu no Outlook, clique no corpo da mensagem "
-                            "e cole com Ctrl+V. Confira e clique em Enviar.")
+        if com_corpo and formatado:
+            aviso = ("O texto já está no e-mail. Para usar a versão formatada (padrão GAP), "
+                     "clique no corpo da mensagem, aperte Ctrl+A e depois Ctrl+V.")
+        elif com_corpo:
+            aviso = "O texto já está no e-mail."
+        else:
+            aviso = ("O texto é grande demais para o link e foi copiado: clique no corpo da "
+                     "mensagem e cole com Ctrl+V.")
+        messagebox.showinfo("E-mail aos alunos", f"{aviso}\n\nConfira e clique em Enviar no Outlook.")
         return True
+
+    def _hwnd(self) -> int | None:
+        try:
+            return int(self.frame(), 16)
+        except (tk.TclError, ValueError):
+            return None
 
     def _copiar(self, texto: str):
         self.clipboard_clear()
