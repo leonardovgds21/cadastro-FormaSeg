@@ -5,6 +5,10 @@ Como usar
 1. Abra CadastroFormaSeg.exe.
 2. Clique em "Abrir ficha (PDF)" e escolha a ficha de empregado do Domínio.
    Um PDF pode ter vários colaboradores (um por página).
+   Ficha que o app não consegue ler (mal formatada depois de assinada):
+   clique em "Digitar colaborador..." e preencha os mesmos dados da ficha
+   (nome completo e CPF são obrigatórios). E-mail, usuário e senha são
+   gerados pelas mesmas regras. Dá para misturar com os lidos do PDF.
 3. Confira os dados de cada colaborador e corrija se precisar.
 4. Escolha os treinamentos na lista suspensa e clique em "Adicionar"
    (ou deixe "Somente cadastro"). "Aplicar a todos" copia os treinamentos
