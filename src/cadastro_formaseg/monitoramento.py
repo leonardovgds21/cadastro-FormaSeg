@@ -205,6 +205,20 @@ def conclusao_no_pdf(arquivo: Path) -> str:
         return ""
 
 
+# ---------- filtro de treinamento ----------
+def _compacto(texto: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", normalizar(texto))
+
+
+def curso_combina(filtro: str, curso: str) -> bool:
+    """Busca aproximada do treinamento: ignora espaços, hífens, pontos, acentos e
+    maiúsculas ("NR33" acha "NR-33", "NR 33 – Supervisor"...). Vírgula ou ";"
+    separa mais de um treinamento. Filtro vazio aceita tudo."""
+    partes = [_compacto(f) for f in re.split(r"[,;]", filtro or "")]
+    partes = [f for f in partes if f]
+    return not partes or any(f in _compacto(curso) for f in partes)
+
+
 # ---------- busca dos nomes ----------
 def procurar(nomes: list[str], matriculas: list[Matricula]) -> list[Resultado]:
     """Para cada nome, as matrículas com o nome igual (sem acento/caixa).

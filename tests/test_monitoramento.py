@@ -108,3 +108,15 @@ def test_conclusao_na_lista_exportada(tmp_path):
                        "Ana Lima;NR 06;01/09/2026;06/09/2026;100%\n", encoding="utf-8")
     m = ler_exportacao(arquivo)[0]
     assert (m.progresso, m.conclusao) == (100, "06/09/2026")
+
+
+def test_filtro_de_treinamento_aproximado():
+    from cadastro_formaseg.monitoramento import curso_combina
+    curso = "NR 33 – Supervisor De Entrada – Teórico"
+    assert curso_combina("NR33", curso)
+    assert curso_combina("nr-33", curso)
+    assert curso_combina("N.R. 33 supervisor", curso)
+    assert curso_combina("teorico", curso)
+    assert not curso_combina("NR35", curso)
+    assert curso_combina("NR35, NR33", curso)
+    assert curso_combina("", curso) and curso_combina(" , ", curso)

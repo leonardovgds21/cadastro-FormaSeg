@@ -18,7 +18,8 @@ from . import __version__, area_transferencia, credenciais, email_alunos, histor
 from .config import carregar_cursos, pasta_certificados, pasta_dados, pasta_saida
 from .ficha import Colaborador, ler_fichas
 from .gerador import Aluno, cpf_valido, gerar_csv_alunos, gerar_csv_cursos, montar_aluno, montar_alunos, validar
-from .monitoramento import Resultado, conclusao_no_pdf, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar
+from .monitoramento import (
+    Resultado, conclusao_no_pdf, curso_combina, ler_exportacao, nome_certificado, nomes_colados, normalizar, procurar)
 
 SEM_MATRICULA = "Somente cadastro (sem matrícula)"
 AVISO_JA_EXISTE = "já existe, só matrícula (confira se é a mesma pessoa)"
@@ -628,6 +629,14 @@ class JanelaMonitoramento(tk.Toplevel):
         self.txt_nomes = tk.Text(quadro, height=7, wrap="none")
         self.txt_nomes.pack(fill="x", pady=(2, 6))
 
+        linha_filtro = ttk.Frame(quadro)
+        linha_filtro.pack(fill="x", pady=(0, 6))
+        ttk.Label(linha_filtro, text="Treinamento (opcional):").pack(side="left")
+        self.filtro_curso = tk.StringVar()
+        ttk.Entry(linha_filtro, textvariable=self.filtro_curso, width=30).pack(side="left", padx=6)
+        ttk.Label(linha_filtro, foreground="#6b7280",
+                  text="ex.: NR33 (acha NR-33, NR 33...). Vários: NR33, NR35. Vazio = todos.").pack(side="left")
+
         botoes = ttk.Frame(quadro)
         botoes.pack(fill="x")
         self.btn_buscar = ttk.Button(botoes, text="Buscar progresso", command=self.buscar)
@@ -678,10 +687,11 @@ class JanelaMonitoramento(tk.Toplevel):
         self.tabela.delete(*self.tabela.get_children())
         self.linhas.clear()
         threading.Thread(target=self._buscar_em_segundo_plano,
-                         args=(nomes, usuario, senha, self.baixar.get(), self.app.mostrar_navegador.get()),
+                         args=(nomes, usuario, senha, self.baixar.get(), self.app.mostrar_navegador.get(),
+                               self.filtro_curso.get().strip()),
                          daemon=True).start()
 
-    def _buscar_em_segundo_plano(self, nomes, usuario, senha, baixar, visivel):
+    def _buscar_em_segundo_plano(self, nomes, usuario, senha, baixar, visivel, filtro=""):
         from .plataforma import ErroPlataforma, Plataforma
 
         log = lambda texto: self.fila.put(("log", texto))  # noqa: E731
@@ -718,10 +728,16 @@ class JanelaMonitoramento(tk.Toplevel):
                     except ErroPlataforma as erro:
                         log(f"AVISO: {nome}: {str(erro).splitlines()[0]}")
                 pasta = pasta_certificados()
+                if filtro:
+                    log(f"Analisando só os treinamentos com \"{filtro}\".")
                 for r in resultados:
                     if not r.matriculas:
                         self.fila.put(("linha", (r.procurado, "não encontrado nas matrículas", "-", "", ""), "falta"))
-                    for m in r.matriculas:
+                        continue
+                    do_filtro = [m for m in r.matriculas if curso_combina(filtro, m.curso)]
+                    if not do_filtro:
+                        self.fila.put(("linha", (r.procurado, f"sem matrícula em \"{filtro}\"", "-", "", ""), "falta"))
+                    for m in do_filtro:
                         if len(m.aluno.split()) < len(r.procurado.split()):
                             m.aluno = r.procurado  # a lista trouxe só o primeiro nome
                         situacao, tag = "", ""

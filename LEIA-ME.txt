@@ -49,6 +49,9 @@ Como usar
    - O curso aparece com o nome completo, como está na plataforma.
    - Para quem está com 100%, a coluna "Conclusão" mostra a data de
      conclusão do treinamento (tirada do certificado).
+   - "Treinamento (opcional)": analisa e baixa só os treinamentos com esse
+     nome, de forma aproximada. "NR33" acha NR-33, NR 33 etc.; para mais
+     de um, separe por vírgula (NR33, NR35). Vazio = todos.
    - "Copiar resultado" copia a tabela para colar no Excel ou num e-mail.
    - Nada é alterado na plataforma: o monitoramento só lê.
 
